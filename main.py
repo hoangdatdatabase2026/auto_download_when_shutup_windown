@@ -7,7 +7,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# Danh sách 6 kho
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
     {"code": "khogt", "prefix": "tkkd_gt"},
@@ -26,7 +25,7 @@ GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
 GDRIVE_JSON_STR = os.environ.get("GDRIVE_CREDENTIALS_JSON")
 
 def upload_file_to_gdrive(file_path):
-    """Tự động tải file Excel hoặc ảnh chụp màn hình lỗi lên Google Drive"""
+    """Đẩy trực tiếp file Excel hoặc ảnh chụp lỗi lên Google Drive"""
     if not GDRIVE_FOLDER_ID or not GDRIVE_JSON_STR:
         print(" ⚠️ Chưa cấu hình Google Drive Secrets, bỏ qua upload.")
         return
@@ -71,7 +70,7 @@ def run_automation():
         page.set_default_timeout(30000)
 
         # -------------------------------------------------------------
-        # BƯỚC 1: ĐĂNG NHẬP VÀ ĐỜ TRANG CHỦ ERP NẠP XONG
+        # BƯỚC 1: ĐĂNG NHẬP (Dùng phím ENTER để Submit Form)
         # -------------------------------------------------------------
         try:
             print(f"2. Truy cập trang đăng nhập: {LOGIN_URL}")
@@ -81,13 +80,12 @@ def run_automation():
             page.fill("id=user_name", ERP_USERNAME)
             page.fill("id=pass_word", ERP_PASSWORD)
             
-            print("3. Bấm Đăng nhập...")
-            page.click("xpath=/html/body/div[3]/div[2]/div/div/form/button")
+            print("3. Gửi thông tin Đăng nhập (Nhấn Enter)...")
+            page.press("id=pass_word", "Enter")
             
-            print(" -> Đang chờ hệ thống ERP nạp xong Sidebar...")
-            page.wait_for_selector("#sidebar", timeout=30000)
-            time.sleep(3)
-            print(" -> Đăng nhập thành công!")
+            # Chờ 5 giây để hệ thống tạo Session đăng nhập
+            time.sleep(5)
+            print(" -> Đã gửi yêu cầu đăng nhập!")
         except Exception as e:
             print(f"❌ LỖI ĐĂNG NHẬP: {e}")
             page.screenshot(path="./downloads/error_login.png")
@@ -96,24 +94,16 @@ def run_automation():
             return
 
         # -------------------------------------------------------------
-        # BƯỚC 2: MỞ BÁO CÁO BẰNG SIDEBAR MENU (GIỐNG UI.VISION)
+        # BƯỚC 2: CHUYỂN THẲNG TỚI TRANG BÁO CÁO
         # -------------------------------------------------------------
         try:
-            print("4. Mở menu Báo cáo Tồn kho...")
-            try:
-                page.click("xpath=//*[@id='sidebar']//a[contains(.,'Kho vận')]", timeout=5000)
-            except:
-                pass
-            time.sleep(1)
-            
-            page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/ul/li[7]/a")
-            time.sleep(1)
-            page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/ul/li[7]/ul/li[10]/a")
-            time.sleep(3)
-        except Exception as e:
-            print(f" ⚠️ Mở menu bằng Sidebar thất bại, chuyển sang gọi URL trực tiếp...")
+            print(f"4. Chuyển hướng tới trang Báo cáo: {REPORT_URL}")
             page.goto(REPORT_URL)
             time.sleep(4)
+        except Exception as e:
+            print(f"❌ LỖI MỞ TRANG BÁO CÁO: {e}")
+            browser.close()
+            return
 
         # -------------------------------------------------------------
         # BƯỚC 3: ĐIỀN TÊN KHO VÀ TẢI TỪNG BÁO CÁO
@@ -127,21 +117,21 @@ def run_automation():
             print(f"⚡ ĐANG XỬ LÝ KHO: {code.upper()}")
             print(f"==========================================")
             try:
-                # Đảm bảo trang báo cáo luôn sẵn sàng
-                page.goto(REPORT_URL)
-                time.sleep(3)
+                # Mở trang báo cáo nếu URL bị lệch
+                if page.url != REPORT_URL:
+                    page.goto(REPORT_URL)
+                    time.sleep(3)
 
-                # Dùng Selector đơn giản hơn rất nhiều cho ô nhập kho
+                # Điền mã kho
                 input_selector = "#ma_kho input"
-                print(" -> Đang tìm ô nhập mã kho (#ma_kho input)...")
+                print(" -> Đang tìm ô nhập mã kho...")
                 page.wait_for_selector(input_selector, state="visible", timeout=20000)
                 
                 print(f" -> Điền mã kho: {code}")
                 page.fill(input_selector, code)
                 time.sleep(1)
                 
-                # Bấm icon cộng kho
-                print(" -> Bấm icon xác nhận kho...")
+                # Bấm icon chọn kho
                 page.click("#ma_kho i")
                 time.sleep(1)
 
@@ -164,7 +154,7 @@ def run_automation():
                 page.fill("id=fileName_ctrl", file_name_val)
                 time.sleep(1)
 
-                # Bấm OK tải file
+                # Bấm nút Tải về trong Modal
                 print(" -> Bấm Tải về...")
                 btn_ok = "xpath=/html/body/div[1]/div/div/div/div[3]/button[1]"
                 page.wait_for_selector(btn_ok, state="visible")
@@ -177,12 +167,12 @@ def run_automation():
                 download.save_as(save_path)
                 print(f" ✅ Đã tải file: {file_name_val}.xlsx")
 
-                # Upload thẳng lên Google Drive
+                # Upload trực tiếp lên Google Drive
                 upload_file_to_gdrive(save_path)
 
             except Exception as ex:
                 print(f" ❌ Lỗi khi xử lý kho {code.upper()}: {ex}")
-                # Chụp ảnh lỗi và đẩy lên Drive để kiểm tra nếu vướng
+                # Nếu bị lỗi, chụp ảnh giao diện gửi lên Drive để kiểm tra
                 err_img = f"./downloads/error_{code}.png"
                 try:
                     page.screenshot(path=err_img)
