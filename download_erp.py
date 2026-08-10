@@ -237,6 +237,81 @@ def navigate_to_report(driver, wait):
         take_screenshot(driver, "02_report_page_error")
         return False
 
+def select_warehouse(driver, wait, code, idx):
+    """
+    Điền mã kho vào XPath chỉ định, bấm Kính lúp/Khoảng trống (Blur),
+    tuyệt đối KHÔNG nhấn Enter để né Popup danh sách kho.
+    """
+    ma_kho_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/tags-input/div/div/input'
+    
+    # 1. Xóa các tag kho đã chọn từ các lần lặp trước (nếu có)
+    try:
+        remove_btns = driver.find_elements(By.XPATH, '//*[@id="ma_kho"]//a[contains(@class,"remove-button")] | //*[@id="ma_kho"]//a[text()="×"]')
+        for r_btn in remove_btns:
+            if r_btn.is_displayed():
+                driver.execute_script("arguments[0].click();", r_btn)
+                time.sleep(0.3)
+    except Exception:
+        pass
+
+    # 2. Định vị ô input kho
+    print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
+    tag_input = wait.until(EC.presence_of_element_located((By.XPATH, ma_kho_xpath)))
+    driver.execute_script("arguments[0].click();", tag_input)
+    time.sleep(0.3)
+    
+    tag_input.send_keys(Keys.CONTROL + "a")
+    tag_input.send_keys(Keys.BACKSPACE)
+    time.sleep(0.3)
+
+    # 3. Gửi văn bản mã kho và kích hoạt event Angular
+    tag_input.send_keys(code)
+    driver.execute_script("""
+        var elem = arguments[0];
+        elem.dispatchEvent(new Event('input', { bubbles: true }));
+        elem.dispatchEvent(new Event('change', { bubbles: true }));
+    """, tag_input)
+    time.sleep(1)
+    print_status(f"3.{idx}.2 SUCCESS", f"-> Da dien xong ma kho [{code}] vao o nhap!")
+
+    # 4. Click nút Kính Lúp (Lookup) nếu có
+    lookup_clicked = False
+    try:
+        search_icons = driver.find_elements(By.XPATH, '//*[@id="ma_kho"]//i[contains(@class,"search")] | //*[@id="ma_kho"]/..//i[contains(@class,"search")] | //*[@id="ma_kho"]//span[contains(@class,"search")]')
+        for icon in search_icons:
+            if icon.is_displayed():
+                driver.execute_script("arguments[0].click();", icon)
+                lookup_clicked = True
+                print_status(f"3.{idx}.2 LOOKUP", "-> Da click nut Kinh Lup / Search lookup!")
+                time.sleep(1)
+                break
+    except Exception:
+        pass
+
+    # 5. Nếu không tìm thấy kính lúp, click ra khoảng trống (Blur) để nhận giá trị
+    if not lookup_clicked:
+        try:
+            blank_space = driver.find_element(By.XPATH, "//label[contains(text(),'Mã kho')] | //*[@id='breadcrumbs'] | //body")
+            driver.execute_script("arguments[0].click();", blank_space)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));", tag_input)
+            print_status(f"3.{idx}.2 BLUR", "-> Da click khoang trong de chot gia tri (Blur event).")
+            time.sleep(1)
+        except Exception:
+            pass
+
+    # 6. Nếu giao diện tự nhảy Popup 'DANH SÁCH KHO', tự động bấm Hủy/Đóng
+    try:
+        modal_close_btns = driver.find_elements(By.XPATH, "//div[contains(@class,'modal')]//button[contains(@class,'close')] | //div[contains(@class,'modal')]//span[text()='×'] | //button[contains(text(),'Hủy')]")
+        for c_btn in modal_close_btns:
+            if c_btn.is_displayed():
+                print_status(f"3.{idx}.2 POPUP CLOSE", "Phat hien Popup Danh sach kho, tien hanh dong...")
+                driver.execute_script("arguments[0].click();", c_btn)
+                time.sleep(1)
+    except Exception:
+        pass
+
+    take_screenshot(driver, f"03_ma_kho_{code}")
+
 def execute_export_and_download(driver, wait, new_file_name):
     """Quy trình mở Popup Export, đổi tên file và Bấm Tải về"""
     print_status("EXPORT B1", "Click B1: //*[@id=\"breadcrumbs\"]/div[2]/div/a...")
@@ -261,14 +336,12 @@ def execute_export_and_download(driver, wait, new_file_name):
     take_screenshot(driver, "04_export_popup_opened")
 
     print_status("EXPORT B4", f"Dien id=fileName_ctrl voi ten: [{new_file_name}]...")
-    file_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@id='fileName_ctrl'] | //div[contains(@class,'modal')]//input")))
+    # Sử dụng visibility_of_element_located để né lỗi 'element not interactable'
+    file_input = wait.until(EC.visibility_of_element_located((By.XPATH, "//input[@id='fileName_ctrl'] | //div[contains(@class,'modal')]//input")))
     
-    file_input.click()
-    file_input.send_keys(Keys.CONTROL + "a")
-    file_input.send_keys(Keys.BACKSPACE)
+    driver.execute_script("arguments[0].click();", file_input)
+    time.sleep(0.3)
     driver.execute_script("arguments[0].value = '';", file_input)
-    time.sleep(0.5)
-
     type_with_js_events(driver, file_input, new_file_name)
     time.sleep(1)
 
@@ -316,33 +389,10 @@ def run_download():
             if "SOBCTonKhaDung" not in driver.current_url:
                 navigate_to_report(driver, wait)
             
-            # 1. ĐIỀN MÃ KHO (KHÔNG BẤM ENTER, KHÔNG CLICK KÍNH LÚP ĐỂ NÉ POPUP)
-            print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
-            ma_kho_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/tags-input/div/div/input'
-            tag_input = wait.until(EC.presence_of_element_located((By.XPATH, ma_kho_xpath)))
-            
-            driver.execute_script("arguments[0].click();", tag_input)
-            time.sleep(0.5)
-            
-            # Điền tên kho và kích hoạt event cho Angular
-            type_with_js_events(driver, tag_input, code)
-            time.sleep(1)
-            print_status(f"3.{idx}.2 SUCCESS", f"-> Da dien xong ma kho [{code}] vao o nhap!")
+            # 1. ĐIỀN MÃ KHO & CLICK KÍNH LÚP HOẶC KHOẢNG TRỐNG (NÉ POPUP & KHÔNG BẤM ENTER)
+            select_warehouse(driver, wait, code, idx)
 
-            # Nếu do giao diện tự nhảy Popup 'DANH SÁCH KHO', tự động đóng lại
-            try:
-                modal_close_btns = driver.find_elements(By.XPATH, "//div[contains(@class,'modal')]//button[contains(@class,'close')] | //div[contains(@class,'modal')]//span[text()='×'] | //button[contains(text(),'Hủy')]")
-                for c_btn in modal_close_btns:
-                    if c_btn.is_displayed():
-                        print_status(f"3.{idx}.2 POPUP CLOSE", "Phat hien Popup Danh sach kho, tien hanh dong...")
-                        driver.execute_script("arguments[0].click();", c_btn)
-                        time.sleep(1)
-            except Exception:
-                pass
-
-            take_screenshot(driver, f"03_ma_kho_{code}")
-
-            # 2. BẤM TrỰC TIẾP NÚT "Xem báo cáo" / SEARCH (BÊN PHẢI MÀN HÌNH)
+            # 2. BẤM TRỰC TIẾP NÚT "Xem báo cáo" / SEARCH (BÊN PHẢI MÀN HÌNH)
             print_status(f"3.{idx}.3", "Nhan nut 'Xem bao cao' / Search...")
             search_btn = None
             try:
