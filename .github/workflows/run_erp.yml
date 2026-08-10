@@ -1,17 +1,17 @@
-name: ERP Auto Download
+name: Run ERP Auto Download
 
 on:
   schedule:
-    # Ví dụ: Chạy tự động lúc 07:00 AM UTC (14:00 giờ Việt Nam) hàng ngày
-    - cron: '0 7 * * *'
-  workflow_dispatch: # Cho phép bấm chạy thủ công trên giao diện GitHub
+    # Tự động chạy lúc 07:00 sáng giờ Việt Nam hàng ngày (00:00 UTC)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Cho phép bấm nút chạy thủ công bất kỳ lúc nào
 
 jobs:
-  build:
+  download-job:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
+    - name: Checkout Code
       uses: actions/checkout@v3
 
     - name: Set up Python
@@ -21,22 +21,14 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install selenium webdriver-manager
 
-    - name: Install Chrome
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
-
-    - name: Run ERP Automation Script
-      env:
-        DOWNLOAD_PATH: "./downloads"
+    - name: Run Script
       run: |
         python download_erp.py
 
-    - name: Save Downloaded Files as Artifacts
-      uses: actions/upload-artifact@v3
+    - name: Upload Downloaded Files
+      uses: actions/upload-artifact@v4
       with:
-        name: erp-reports
-        path: ./downloads/
+        name: Báo-Cáo-Tồn-Kho-Excel
+        path: downloads/
