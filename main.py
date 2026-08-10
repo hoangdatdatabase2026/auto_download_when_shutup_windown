@@ -65,7 +65,6 @@ def run_automation():
     
     os.makedirs("./downloads", exist_ok=True)
     
-    # BƯỚC 4 trong quy trình: Tạo ngày giờ
     now = datetime.now()
     current_date_time = now.strftime("%d.%m.%Y %H%M")
     print(f"[THỜI GIAN] Format timestamp tạo file: {current_date_time}")
@@ -82,13 +81,12 @@ def run_automation():
         print(" -> [OK] Trình duyệt đã sẵn sàng.")
 
         # -------------------------------------------------------------
-        # BƯỚC 1, 2 & 3: ĐĂNG NHẬP
+        # BƯỚC 1, 2 & 3: ĐĂNG NHẬP FLEXIBLE
         # -------------------------------------------------------------
         print("\n[BƯỚC 2 & 3] Tiến hành đăng nhập hệ thống ERP...")
         try:
             print(f" -> Mở trang Đăng nhập: {LOGIN_URL}")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            print(" -> [OK] Trang Đăng nhập đã tải xong.")
 
             print(" -> Đang điền Tên đăng nhập...")
             page.wait_for_selector("id=user_name")
@@ -97,31 +95,37 @@ def run_automation():
             print(" -> Đang điền Mật khẩu...")
             page.fill("id=pass_word", ERP_PASSWORD)
             
-            print(" -> Bấm nút Đăng nhập...")
-            page.click("xpath=/html/body/div[3]/div[2]/div/div/form/button")
+            print(" -> Gửi yêu cầu Đăng nhập (Ấn Enter & Click)...")
+            page.press("id=pass_word", "Enter")
+            time.sleep(1)
+            try:
+                page.click("button[type='submit']", timeout=3000)
+            except:
+                pass
             
-            print(" -> Đang chờ xác thực phiên đăng nhập...")
-            page.wait_for_url("**/Solution/ERP/**", timeout=30000)
+            print(" -> Đang chờ hệ thống khởi tạo phiên làm việc (5 giây)...")
+            time.sleep(5)
+
+            # Mở thử trang Báo cáo để xác nhận Đăng nhập thành công hay chưa
+            print(" -> Kiểm tra quyền truy cập bằng cách mở trang Báo cáo...")
+            page.goto(REPORT_URL, wait_until="domcontentloaded")
             time.sleep(3)
-            print(f" -> [OK ✅] ĐĂNG NHẬP THÀNH CÔNG! URL hiện tại: {page.url}")
+
+            if "Account/Login" in page.url or "Login" in page.url:
+                print(f" -> [LỖI ❌] ĐĂNG NHẬP THẤT BẠI! Hệ thống bị đẩy ngược về trang Login. Hãy kiểm tra lại ERP_USERNAME và ERP_PASSWORD trên GitHub Secrets.")
+                page.screenshot(path="./downloads/error_login.png")
+                upload_file_to_gdrive("./downloads/error_login.png")
+                browser.close()
+                return
+            else:
+                print(f" -> [OK ✅] ĐĂNG NHẬP THÀNH CÔNG! Đã vào trang: {page.url}")
+
         except Exception as e:
-            print(f" -> [LỖI ❌] ĐĂNG NHẬP THẤT BẠI (URL: {page.url}): {e}")
+            print(f" -> [LỖI ❌] ĐĂNG NHẬP GẶP SỰ CỐ: {e}")
             page.screenshot(path="./downloads/error_login.png")
             upload_file_to_gdrive("./downloads/error_login.png")
             browser.close()
             return
-
-        # -------------------------------------------------------------
-        # BƯỚC 5: TRUY CẬP TRANG BÁO CÁO
-        # -------------------------------------------------------------
-        print("\n[BƯỚC 5] Chuyển hướng tới Báo cáo Tồn khả dụng...")
-        try:
-            print(f" -> Điều hướng tới URL: {REPORT_URL}")
-            page.goto(REPORT_URL, wait_until="domcontentloaded")
-            time.sleep(3)
-            print(" -> [OK ✅] Đã tải giao diện Báo cáo.")
-        except Exception as e:
-            print(f" -> [CẢNH BÁO ⚠️] Lỗi chuyển URL báo cáo: {e}")
 
         # -------------------------------------------------------------
         # BƯỚC 6 & 7: VÒNG LẶP XỬ LÝ TỪNG KHO
