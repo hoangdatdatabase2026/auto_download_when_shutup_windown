@@ -200,7 +200,6 @@ def perform_login_with_retry(driver, wait, max_retries=3):
     return False
 
 def navigate_to_report(driver, wait):
-    """Thử chuyển hướng thẳng, nếu bị kẹt ở OverviewDisplay thì bấm cây Sidebar Menu"""
     print_status("NAVIGATE", "Dang thu chuyen huong thuc te toi trang Bieu mau...")
     driver.get(REPORT_URL)
     driver.execute_script("window.location.hash = '#/SO/Report/SOBCTonKhaDung';")
@@ -212,20 +211,14 @@ def navigate_to_report(driver, wait):
 
     print_status("NAVIGATE FALLBACK", "Khong the chuyen huong thuc te, tien hanh click Sidebar Menu...")
     try:
-        # 1. Click Menu 'Kho vận'
-        print_status("SIDEBAR 1/3", "Click Menu 'Kho vận'...")
         kho_van_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sidebar"]/div/ul/li[5]/a')))
         driver.execute_script("arguments[0].click();", kho_van_btn)
         time.sleep(2)
 
-        # 2. Click Submenu 'Báo cáo'
-        print_status("SIDEBAR 2/3", "Click Submenu 'Báo cáo'...")
         bao_cao_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sidebar"]/div/ul/li[5]/ul/li[7]/a')))
         driver.execute_script("arguments[0].click();", bao_cao_btn)
         time.sleep(2)
 
-        # 3. Click Submenu 'Báo cáo tồn khả dụng'
-        print_status("SIDEBAR 3/3", "Click Submenu 'Báo cáo tồn khả dụng'...")
         target_report_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sidebar"]/div/ul/li[5]/ul/li[7]/ul/li[10]/a')))
         driver.execute_script("arguments[0].click();", target_report_btn)
         time.sleep(4)
@@ -234,6 +227,52 @@ def navigate_to_report(driver, wait):
         return True
     except Exception as e:
         print_status("SIDEBAR ERROR", f"Loi khi thao tac Sidebar Menu: {str(e)}")
+        return False
+
+def trigger_export_excel_popup(driver, wait):
+    print_status("EXPORT POPUP", "Dang kiem tra va kich hoat Popup Export Excel...")
+    
+    # 1. Thử click trực tiếp vào chữ 'Export Excel' nếu đã hiển thị sẵn
+    try:
+        direct_links = driver.find_elements(By.XPATH, "//a[contains(text(),'Export Excel')] | //button[contains(text(),'Export Excel')]")
+        for link in direct_links:
+            driver.execute_script("arguments[0].click();", link)
+            time.sleep(1.5)
+            if len(driver.find_elements(By.ID, "fileName_ctrl")) > 0:
+                return True
+    except Exception:
+        pass
+
+    # 2. Thử click các menu dropdown trên thanh Breadcrumbs
+    possible_xpaths = [
+        '//*[@id="breadcrumbs"]//a[contains(@class,"dropdown")]',
+        '//*[@id="breadcrumbs"]//ul/li[contains(@class,"open")]/ul/li/a',
+        '//*[@id="breadcrumbs"]//i[contains(@class,"excel") or contains(@class,"export") or contains(@class,"share")]/..',
+        '//*[@id="breadcrumbs"]/div[2]/div/a',
+        '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i',
+        '//*[@id="breadcrumbs"]//ul/li[3]/a'
+    ]
+
+    for xp in possible_xpaths:
+        try:
+            elements = driver.find_elements(By.XPATH, xp)
+            for elem in elements:
+                driver.execute_script("arguments[0].click();", elem)
+                time.sleep(1)
+                
+                sub_exports = driver.find_elements(By.XPATH, "//a[contains(text(),'Export Excel')]")
+                for sub in sub_exports:
+                    driver.execute_script("arguments[0].click();", sub)
+                    time.sleep(1.5)
+                    if len(driver.find_elements(By.ID, "fileName_ctrl")) > 0:
+                        return True
+        except Exception:
+            pass
+
+    try:
+        wait.until(EC.presence_of_element_located((By.ID, "fileName_ctrl")))
+        return True
+    except Exception:
         return False
 
 def run_download():
@@ -261,7 +300,6 @@ def run_download():
     print_status("BUOC 3/4", f"BAT DAU XU LY TAI BAO CAO CHO {total_warehouses} KHO")
     print("="*70, flush=True)
 
-    # ĐIỀU HƯỚNG TỚI TRANG BÁO CÁO (THẲNG HOẶC QUA SIDEBAR)
     navigate_to_report(driver, wait)
 
     for idx, item in enumerate(WAREHOUSES, 1):
@@ -272,14 +310,13 @@ def run_download():
         print(f"\n>>> [KHO {idx}/{total_warehouses}] KHO: {code.upper()} | TEN FILE DU KIEN: {file_name}", flush=True)
         
         try:
-            # Nếu vì lý do gì đó trang bị lệch khỏi Báo cáo, gọi hàm chuyển hướng lại
             if "SOBCTonKhaDung" not in driver.current_url:
                 print_status(f"3.{idx}.0 RE-NAVIGATE", "Trang bi lech, tien hanh dieu huong lai trang Bieu mau...")
                 navigate_to_report(driver, wait)
             
             print_status(f"3.{idx}.1 STATUS", f"URL hien tai: {driver.current_url}")
 
-            # ĐIỀN MÃ KHO THEO XPATH
+            # ĐIỀN MÃ KHO
             print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
             ma_kho_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/tags-input/div/div/input'
             
@@ -293,7 +330,6 @@ def run_download():
             time.sleep(1)
             print_status(f"3.{idx}.2 SUCCESS", f"-> Da dien '{code}' vao o ma_kho!")
 
-            # Click Icon tag nếu có
             try:
                 tag_icon = driver.find_element(By.XPATH, '//*[@id="ma_kho"]/itg-tags-input/div/div/div/i')
                 driver.execute_script("arguments[0].click();", tag_icon)
@@ -310,22 +346,17 @@ def run_download():
                 search_btn = driver.find_element(By.XPATH, '//button[contains(@class,"btn-primary")]')
                 
             driver.execute_script("arguments[0].click();", search_btn)
-            time.sleep(5)
-            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem/Xem bao cao.")
+            
+            # --- ĐÃ CẬP NHẬT: ĐỜI DÚNG 60 GiÂY CHO HỆ THỐNG TẢI XONG BÁO CÁO ---
+            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem/Xem bao cao. Dang cho 60s de he thong tai xong du lieu bao cao...")
+            time.sleep(60)
 
-            # MỞ MENU EXPORT EXCEL
-            print_status(f"3.{idx}.4", "Mo Breadcrumb & Menu Export Excel...")
-            btn_breadcrumb = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/a')))
-            driver.execute_script("arguments[0].click();", btn_breadcrumb)
-            time.sleep(1.5)
-
-            btn_export_icon = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i')))
-            driver.execute_script("arguments[0].click();", btn_export_icon)
-            time.sleep(1.5)
-
-            btn_export_link = wait.until(EC.element_to_be_clickable((By.LINK_TEXT, 'Export Excel')))
-            driver.execute_script("arguments[0].click();", btn_export_link)
-            time.sleep(2)
+            # MỞ POPUP EXPORT EXCEL
+            print_status(f"3.{idx}.4", "Mo Popup Export Excel...")
+            popup_status = trigger_export_excel_popup(driver, wait)
+            
+            if not popup_status:
+                print_status(f"3.{idx}.4 WARN", "Chua bat duoc popup, thu gui phim Enter hoac click lai...")
 
             # ĐIỀN TÊN FILE TRONG MODAL POPUP
             print_status(f"3.{idx}.5", f"Dien ten file moi: [{file_name}] va Xac nhan...")
@@ -333,7 +364,7 @@ def run_download():
             type_with_js_events(driver, file_name_input, file_name)
             time.sleep(1)
 
-            confirm_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1]')))
+            confirm_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1] | //button[contains(text(),"Xác nhận") or contains(text(),"Tải")]')))
             driver.execute_script("arguments[0].click();", confirm_btn)
             print_status(f"3.{idx}.5 SUCCESS", f"-> Da gui lenh tai file [{file_name}]. Cho 12 giay...")
             
