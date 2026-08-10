@@ -2,33 +2,35 @@ name: Run ERP Auto Download
 
 on:
   schedule:
-    # Tự động chạy lúc 07:00 sáng giờ Việt Nam hàng ngày (00:00 UTC)
-    - cron: '0 0 * * *'
-  workflow_dispatch: # Cho phép bấm nút chạy thủ công bất kỳ lúc nào
+    # Chạy lúc 7h, 9h, 11h, 13h, 15h, 17h giờ Việt Nam (00:00, 02:00, 04:00, 06:00, 08:00, 10:00 UTC)
+    - cron: '0 0,2,4,6,8,10 * * *'
+  workflow_dispatch: # Cho phép bấm chạy thủ công trên GitHub
 
 jobs:
   download-job:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
+    - name: "[GIAI DOAN 1/4] Lay ma nguon tu Repository"
       uses: actions/checkout@v3
 
-    - name: Set up Python
+    - name: "[GIAI DOAN 2/4] Khoi tao moitruong Python"
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
 
-    - name: Install Dependencies
+    - name: "[GIAI DOAN 3/4] Cai dat cac thu vien (Selenium, Driver, Google Drive API)"
       run: |
-        pip install selenium webdriver-manager
+        echo "--------------------------------------------------"
+        echo ">>> Dang cai dat cac thu vien phu thuoc..."
+        echo "--------------------------------------------------"
+        pip install selenium webdriver-manager google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-    - name: Run Script
+    - name: "[GIAI DOAN 4/4] Thuc thi Script Python tai du lieu & Upload len Google Drive"
+      env:
+        ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
+        ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
+        GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
       run: |
         python download_erp.py
-
-    - name: Upload Downloaded Files
-      uses: actions/upload-artifact@v4
-      with:
-        name: Báo-Cáo-Tồn-Kho-Excel
-        path: downloads/
