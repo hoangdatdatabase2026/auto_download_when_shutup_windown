@@ -22,7 +22,7 @@ ERP_PASS = os.getenv("ERP_PASSWORD")
 GDRIVE_JSON = os.getenv("GDRIVE_CREDENTIALS_JSON")
 FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID")
 
-TARGET_OVERVIEW_URL = "http://103.149.99.95:8011/Solution/ERP/#/Main/OverviewDisplay"
+REPORT_URL = "http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung"
 
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
@@ -120,7 +120,6 @@ def setup_driver(download_path):
     return driver
 
 def type_with_js_events(driver, element, value):
-    """Gõ phím và bắn event JS để Angular/React ghi nhận dữ liệu input"""
     element.clear()
     element.send_keys(value)
     driver.execute_script("""
@@ -131,7 +130,6 @@ def type_with_js_events(driver, element, value):
     """, element)
 
 def handle_modal_popup(driver):
-    """Tự động kiểm tra và click nút 'CÓ' / 'CO' nếu ERP hiện popup cảnh báo đăng nhập đè phiên"""
     time.sleep(2)
     confirm_words = ["CO", "CÓ", "Có", "có", "Xác nhận", "OK", "Yes"]
     for word in confirm_words:
@@ -148,7 +146,6 @@ def handle_modal_popup(driver):
     return False
 
 def perform_login_with_retry(driver, wait, max_retries=3):
-    """Thực hiện đăng nhập và tự động xử lý Popup xác nhận CÓ"""
     print("\n" + "-"*50, flush=True)
     print_status("BUOC 2/4", "TIEN HANH DANG NHAP HE THONG ERP")
 
@@ -162,7 +159,6 @@ def perform_login_with_retry(driver, wait, max_retries=3):
             user_input = wait.until(EC.presence_of_element_located((By.ID, "user_name")))
             pass_input = driver.find_element(By.ID, "pass_word")
 
-            # Điền thông tin kèm kích hoạt Event JS
             type_with_js_events(driver, user_input, ERP_USER if ERP_USER else "")
             type_with_js_events(driver, pass_input, ERP_PASS if ERP_PASS else "")
             time.sleep(1)
@@ -180,7 +176,6 @@ def perform_login_with_retry(driver, wait, max_retries=3):
             if not login_clicked:
                 pass_input.send_keys(Keys.RETURN)
 
-            # Kiểm tra Popup "CÓ" (Modal đè phiên)
             handle_modal_popup(driver)
 
             print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Kiem tra dieu huong trang...")
@@ -191,20 +186,11 @@ def perform_login_with_retry(driver, wait, max_retries=3):
                 if "OverviewDisplay" in curr_url or "Solution/ERP/#" in curr_url:
                     print_status("DANG NHAP THANH CONG", f"-> DA DEN DUNG PAGE TARGET: {curr_url}")
                     return True
-                # Thử tìm lại popup nếu xuất hiện trễ
                 handle_modal_popup(driver)
                 time.sleep(2)
 
             curr_url = driver.current_url
             print_status("THAT BAI", f"Lan {attempt} dung tai URL: {curr_url}")
-            
-            # In ra văn bản thực tế đang xuất hiện trên màn hình web để kiểm tra
-            try:
-                body_text = driver.find_element(By.TAG_NAME, "body").text
-                clean_text = " ".join(body_text.split())[:250]
-                print_status("NOI DUNG WEB", f"Text hien thi tren web: '{clean_text}'")
-            except Exception:
-                pass
 
         except Exception as e:
             print_status("LOI THAO TAC", f"Loi lan {attempt}: {str(e)}")
@@ -226,7 +212,7 @@ def run_download():
     if not login_success:
         print("\n" + "!"*70, flush=True)
         print_status("FATAL ERROR", "DANG NHAP THAT BAI SAU 3 LAN THU LAI!")
-        print_status("FATAL ERROR", "STOP CODE: DUNG TIEN TRINH CHU DONG DE KHOI CHAY CAI CAC BOCK TIEP THEO.")
+        print_status("FATAL ERROR", "STOP CODE: DUNG TIEN TRINH CHU DONG.")
         print("!"*70 + "\n", flush=True)
         driver.quit()
         sys.exit(1)
@@ -238,6 +224,12 @@ def run_download():
     print_status("BUOC 3/4", f"BAT DAU XU LY TAI BAO CAO CHO {total_warehouses} KHO")
     print("="*70, flush=True)
 
+    # ĐIỀU HƯỚNG SANG TRANG BÁO CÁO TỒN KHẢ DỤNG QUA ANGULAR ROUTER
+    print_status("3.0 ROUTING", f"Chuyen huong Angular Route sang trang Bieu mau: {REPORT_URL}")
+    driver.get(REPORT_URL)
+    driver.execute_script("window.location.hash = '#/SO/Report/SOBCTonKhaDung';")
+    time.sleep(5)
+
     for idx, item in enumerate(WAREHOUSES, 1):
         code = item["code"]
         prefix = item["prefix"]
@@ -246,58 +238,77 @@ def run_download():
         print(f"\n>>> [KHO {idx}/{total_warehouses}] KHO: {code.upper()} | TEN FILE DU KIEN: {file_name}", flush=True)
         
         try:
-            print_status(f"3.{idx}.1", "Mo URL Bao cao Ton kha dung...")
-            driver.get("http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung")
-            time.sleep(5)
+            # Đảm bảo trang đã load đúng vị trí Báo cáo Tồn kho
+            if "#/SO/Report/SOBCTonKhaDung" not in driver.current_url:
+                print_status(f"3.{idx}.1", "Mo URL Bao cao Ton kha dung...")
+                driver.get(REPORT_URL)
+                driver.execute_script("window.location.hash = '#/SO/Report/SOBCTonKhaDung';")
+                time.sleep(4)
             
             print_status(f"3.{idx}.1 STATUS", f"URL hien tai: {driver.current_url}")
 
+            # ĐIỀN MÃ KHO THEO XPATH CHÍNH XÁC DO BẠN CUNG CẤP
             print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
-            tag_input = wait.until(EC.presence_of_element_located((By.XPATH, '//div[@id="ma_kho"]//input')))
-            tag_input.clear()
-            tag_input.send_keys(code)
+            ma_kho_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/tags-input/div/div/input'
+            
+            tag_input = wait.until(EC.presence_of_element_located((By.XPATH, ma_kho_xpath)))
+            
+            # Click trực tiếp để activate ô tags-input
+            driver.execute_script("arguments[0].click();", tag_input)
+            time.sleep(0.5)
+            
+            type_with_js_events(driver, tag_input, code)
             tag_input.send_keys(Keys.ENTER)
             time.sleep(1)
             print_status(f"3.{idx}.2 SUCCESS", f"-> Da dien '{code}' vao o ma_kho!")
 
+            # Click Icon tag nếu có
             try:
                 tag_icon = driver.find_element(By.XPATH, '//*[@id="ma_kho"]/itg-tags-input/div/div/div/i')
-                tag_icon.click()
+                driver.execute_script("arguments[0].click();", tag_icon)
             except Exception:
                 pass
             time.sleep(2)
 
-            print_status(f"3.{idx}.3", "Nhan nut 'Tim kiem'...")
-            search_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="search"]/span')))
-            search_btn.click()
+            # BẤM NÚT "Xem báo cáo" / Search
+            print_status(f"3.{idx}.3", "Nhan nut 'Xem bao cao' / Search...")
+            search_btn = None
+            try:
+                search_btn = driver.find_element(By.XPATH, '//*[@id="search"]/span | //button[contains(text(),"Xem báo cáo")]')
+            except Exception:
+                search_btn = driver.find_element(By.XPATH, '//button[contains(@class,"btn-primary")]')
+                
+            driver.execute_script("arguments[0].click();", search_btn)
             time.sleep(5)
-            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem.")
+            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem/Xem bao cao.")
 
+            # MỞ MENU EXPORT EXCEL
             print_status(f"3.{idx}.4", "Mo Breadcrumb & Menu Export Excel...")
             btn_breadcrumb = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/a')))
-            btn_breadcrumb.click()
+            driver.execute_script("arguments[0].click();", btn_breadcrumb)
             time.sleep(1.5)
 
             btn_export_icon = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i')))
-            btn_export_icon.click()
+            driver.execute_script("arguments[0].click();", btn_export_icon)
             time.sleep(1.5)
 
             btn_export_link = wait.until(EC.element_to_be_clickable((By.LINK_TEXT, 'Export Excel')))
-            btn_export_link.click()
+            driver.execute_script("arguments[0].click();", btn_export_link)
             time.sleep(2)
 
+            # ĐIỀN TÊN FILE TRONG MODAL POPUP
             print_status(f"3.{idx}.5", f"Dien ten file moi: [{file_name}] va Xac nhan...")
             file_name_input = wait.until(EC.presence_of_element_located((By.ID, "fileName_ctrl")))
-            file_name_input.clear()
-            file_name_input.send_keys(file_name)
+            type_with_js_events(driver, file_name_input, file_name)
             time.sleep(1)
 
             confirm_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1]')))
-            confirm_btn.click()
+            driver.execute_script("arguments[0].click();", confirm_btn)
             print_status(f"3.{idx}.5 SUCCESS", f"-> Da gui lenh tai file [{file_name}]. Cho 12 giay...")
             
             time.sleep(12)
 
+            # KIỂM TRA FILE ĐÃ TẢI VỀ CHƯA
             current_files = list_downloaded_files()
             print_status(f"3.{idx}.6 CHECK FILE", f"Tong so file trong thu muc local: {len(current_files)}")
             for f in current_files:
