@@ -229,105 +229,48 @@ def navigate_to_report(driver, wait):
         print_status("SIDEBAR ERROR", f"Loi khi thao tac Sidebar Menu: {str(e)}")
         return False
 
-def open_export_excel_popup(driver, wait):
-    """Thực hiện đúng 2 bước:
-    1. Click Icon Export (hình mũi tên đi lên trong khay) trên thanh công cụ
-    2. Click dòng 'Export Excel' xuất hiện trong menu xổ xuống
+def execute_export_and_download(driver, wait, new_file_name):
+    """Thực hiện chính xác quy trình 4 bước từ UI Vision:
+    B1: Click xpath=//*[@id="breadcrumbs"]/div[2]/div/a
+    B2: Click xpath=//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i
+    B3: Click Export Excel (xpath=//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/ul/li/a)
+    B4: Clear id=fileName_ctrl, điền tên file mới và bấm Tải về
     """
-    print_status("EXPORT POPUP", "NHỊP 1: Dang tim va click Icon Export (mui ten di len) tren thanh cong cu...")
-    
-    icon_clicked = False
-    icon_xpaths = [
-        '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i',
-        '//*[@id="breadcrumbs"]//ul/li[3]/a',
-        '//i[contains(@class,"upload") or contains(@class,"share") or contains(@class,"export") or contains(@class,"fa-share")]/..',
-        '//a[i[contains(@class,"upload") or contains(@class,"share") or contains(@class,"export")]]',
-        '//*[@id="breadcrumbs"]/div[2]/div/a'
-    ]
+    print_status("EXPORT B1", "Click xpath=//*[@id=\"breadcrumbs\"]/div[2]/div/a...")
+    b1_elem = wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/a')))
+    driver.execute_script("arguments[0].click();", b1_elem)
+    time.sleep(1)
 
-    for xp in icon_xpaths:
-        try:
-            elems = driver.find_elements(By.XPATH, xp)
-            for elem in elems:
-                driver.execute_script("arguments[0].click();", elem)
-                icon_clicked = True
-                print_status("EXPORT POPUP", f"-> Da click Icon Export qua XPath: {xp}")
-                time.sleep(1.5)
-                break
-            if icon_clicked:
-                break
-        except Exception:
-            pass
+    print_status("EXPORT B2", "Click xpath=//*[@id=\"breadcrumbs\"]/div[2]/div/ul/li[3]/a/i...")
+    b2_elem = wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i')))
+    driver.execute_script("arguments[0].click();", b2_elem)
+    time.sleep(1)
 
-    if not icon_clicked:
-        print_status("EXPORT POPUP WARN", "Khong tim thay Icon Export theo XPath cu, thu click nut thu 3 trong Toolbar...")
-        try:
-            toolbar_icons = driver.find_elements(By.XPATH, '//*[@id="breadcrumbs"]//ul/li/a')
-            if len(toolbar_icons) >= 3:
-                driver.execute_script("arguments[0].click();", toolbar_icons[2])
-                time.sleep(1.5)
-        except Exception:
-            pass
-
-    print_status("EXPORT POPUP", "NHỊP 2: Dang click chon dong 'Export Excel' trong menu xo xuong...")
+    print_status("EXPORT B3", "Click Export Excel...")
     try:
-        excel_link = wait.until(EC.element_to_be_clickable((
-            By.XPATH, "//a[contains(text(),'Export Excel')] | //*[contains(text(),'Export Excel')]"
-        )))
-        driver.execute_script("arguments[0].click();", excel_link)
-        time.sleep(2)
-        print_status("EXPORT POPUP", "-> Da click dong 'Export Excel'. Dang cho Popup 'XUAT DU LIEU'...")
-    except Exception as e:
-        print_status("EXPORT POPUP WARN", f"Loi khi click dong 'Export Excel': {str(e)}")
+        b3_elem = wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/ul/li/a')))
+        driver.execute_script("arguments[0].click();", b3_elem)
+    except Exception:
+        b3_elem = wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(text(),'Export Excel')]")))
+        driver.execute_script("arguments[0].click();", b3_elem)
+    time.sleep(2)
 
-    # Kiểm tra Modal 'XUẤT DỮ LIỆU' đã xuất hiện chưa
-    try:
-        wait_modal = WebDriverWait(driver, 10)
-        wait_modal.until(EC.presence_of_element_located((
-            By.XPATH, "//input[@id='fileName_ctrl'] | //*[contains(text(),'XUẤT DỮ LIỆU')]"
-        )))
-        print_status("EXPORT POPUP SUCCESS", "Da hien Popup 'XUAT DU LIEU' thanh cong!")
-        return True
-    except Exception as e:
-        print_status("EXPORT POPUP FAIL", f"Popup 'Xuat du lieu' chua xuat hien: {str(e)}")
-        return False
-
-def process_file_download(driver, wait, new_file_name):
-    """Xóa tên mặc định 'Báo cáo tồn khả dụng', điền tên mới và bấm 'Tải về'"""
-    print_status("DOWNLOAD STEP", f"Dang xu ly ten file va tai ve: [{new_file_name}]...")
-    
-    file_input = wait.until(EC.presence_of_element_located((
-        By.XPATH, "//input[@id='fileName_ctrl'] | //div[contains(@class,'modal')]//input[@type='text']"
-    )))
+    print_status("EXPORT B4", f"Dien id=fileName_ctrl voi ten: [{new_file_name}]...")
+    file_input = wait.until(EC.presence_of_element_located((By.ID, "fileName_ctrl")))
     
     file_input.click()
-    time.sleep(0.5)
-
-    # 1. Xóa sạch chữ "Báo cáo tồn khả dụng"
     file_input.send_keys(Keys.CONTROL + "a")
     file_input.send_keys(Keys.BACKSPACE)
     driver.execute_script("arguments[0].value = '';", file_input)
     time.sleep(0.5)
 
-    try:
-        clear_x = driver.find_element(By.XPATH, "//div[contains(@class,'modal')]//input/following-sibling::* | //div[contains(@class,'modal')]//i[contains(@class,'close') or contains(@class,'times') or contains(@class,'remove')]")
-        driver.execute_script("arguments[0].click();", clear_x)
-        time.sleep(0.3)
-    except Exception:
-        pass
-
-    # 2. Điền tên file mới
     type_with_js_events(driver, file_input, new_file_name)
     time.sleep(1)
-    print_status("DOWNLOAD STEP", f"-> Da xoa chu cu va dien ten file moi: [{new_file_name}]")
 
-    # 3. Bấm nút "Tải về"
-    print_status("DOWNLOAD STEP", "Nhan nut 'Tải về'...")
-    tai_ve_btn = wait.until(EC.element_to_be_clickable((
-        By.XPATH, "//button[contains(text(),'Tải về')] | //button[contains(text(),'Tai ve')] | //div[contains(@class,'modal')]//button[contains(@class,'btn-primary')]"
-    )))
-    driver.execute_script("arguments[0].click();", tai_ve_btn)
-    print_status("DOWNLOAD STEP SUCCESS", f"Da bam nut 'Tải về' cho file [{new_file_name}]. Dang cho 15 giây de hoàn tất tải...")
+    print_status("EXPORT CONFIRM", "Nhan nut 'Tải về' (/html/body/div[1]/div/div/div/div[3]/button[1])...")
+    confirm_btn = wait.until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1]')))
+    driver.execute_script("arguments[0].click();", confirm_btn)
+    print_status("EXPORT SUCCESS", f"Da gui lenh tai [{new_file_name}]. Cho 15 giây hoàn tất...")
 
 def run_download():
     print("="*70, flush=True)
@@ -401,16 +344,12 @@ def run_download():
                 
             driver.execute_script("arguments[0].click();", search_btn)
             
-            # ĐỜI DÚNG 60 GiÂY CHO HỆ THỐNG TẢI BÁO CÁO
-            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem/Xem bao cao. Dang cho 60s de he thong tai xong du lieu bao cao...")
-            time.sleep(60)
+            # Đợi DÚNG 60 GIÂY CHO HỆ THỐNG TẢI DỮ LIỆU BÁO CÁO
+            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem/Xem bao cao. Dang cho 40s de he thong tai xong du lieu bao cao...")
+            time.sleep(40)
 
-            # THỰC HIỆN BẤM ICON EXPORT -> BẤM 'EXPORT EXCEL'
-            print_status(f"3.{idx}.4", "Bat dau chuoi thao tac mo Popup Export Excel...")
-            open_export_excel_popup(driver, wait)
-
-            # XÓA TÊN CŨ, ĐIỀN TÊN MỚI VÀ BẤM NÚT "TẢI VỀ"
-            process_file_download(driver, wait, file_name)
+            # THỰC HIỆN CHÍNH XÁC QUY TRÌNH EXPORT 4 BƯỚC
+            execute_export_and_download(driver, wait, file_name)
             time.sleep(15)
 
             # KIỂM TRA FILE ĐÃ TẢI VỀ THÀNH CÔNG CHƯA
