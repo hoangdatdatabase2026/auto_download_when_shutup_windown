@@ -1,76 +1,108 @@
 import os
-import json
+import time
+from datetime import datetime
 from playwright.sync_api import sync_playwright
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 
-# 1. Đọc dữ liệu từ biến môi trường (Secrets)
-ERP_URL = os.environ.get("http://103.149.99.95:8011/Solution/ERP/#/Main/OverviewDisplay")
-ERP_USERNAME = os.environ.get("HD01566")
-ERP_PASSWORD = os.environ.get("8UIa8&!v")
-GDRIVE_FOLDER_ID = os.environ.get("1fr6RlluRTvKUQ7mFPA_-sTMF6GqPaxLA")
-GDRIVE_JSON_STR = os.environ.get("GDRIVE_CREDENTIALS_JSON")
+# Danh sách 6 kho và tiền tố tên file tương ứng trong JSON của bạn
+WAREHOUSES = [
+    {"code": "khoda", "prefix": "tkkd_da"},
+    {"code": "khogt", "prefix": "tkkd_gt"},
+    {"code": "khoak", "prefix": "tkkd_ak"},
+    {"code": "khosg", "prefix": "tkkd_hcm"},
+    {"code": "khovc", "prefix": "tkkd_vc"},
+    {"code": "khojp", "prefix": "tkkd_jp"},
+]
 
-def download_erp_data():
+# Đọc tài khoản từ biến môi trường (Secrets trên GitHub) hoặc dùng mặc định từ JSON
+ERP_URL = os.environ.get("ERP_URL", "http://103.149.99.95:8011/Account/Login")
+ERP_USERNAME = os.environ.get("ERP_USERNAME", "HD01566")
+ERP_PASSWORD = os.environ.get("ERP_PASSWORD", "8UIa8&!v")
+REPORT_URL = "http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung"
+
+def run_automation():
+    # Tạo thư mục lưu file tải về nếu chưa có
+    os.makedirs("./downloads", exist_ok=True)
+    
+    # Định dạng thời gian giống định dạng storeEval trong UI.Vision của bạn (dd.mm.yyyy HHSS)
+    now = datetime.now()
+    current_date_time = now.strftime("%d.%m.%Y %H%S")
+
     with sync_playwright() as p:
-        # Bật trình duyệt Chromium ở chế độ ẩn (headless)
+        # Bật trình duyệt Chromium (headless=True để chạy ẩn trên GitHub Actions)
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(accept_downloads=True)
+        page = context.new_page()
 
-        print("1. Đang mở trang web ERP...")
+        # ------------------------------------------------------------------
+        # 1. ĐĂNG NHẬP
+        # ------------------------------------------------------------------
+        print("1. Đang mở trang đăng nhập ERP...")
         page.goto(ERP_URL)
-
-        # -------------------------------------------------------------
-        # ⚠️ LƯU Ý: Đổi 'input[name="username"]' thành Selector thực tế trang ERP của bạn
-        # -------------------------------------------------------------
+        
+        page.click("id=user_name")
+        page.fill("id=user_name", ERP_USERNAME)
+        page.fill("id=pass_word", ERP_PASSWORD)
+        
+        # Bấm nút đăng nhập
         print("2. Đang đăng nhập...")
-        page.fill("input[name='username']", ERP_USERNAME)
-        page.fill("input[name='password']", ERP_PASSWORD)
-        page.click("button[type='submit']")
-
-        # Chờ trang tải xong sau đăng nhập
+        page.click("xpath=/html/body/div[3]/div[2]/div/div/form/button")
         page.wait_for_load_state("networkidle")
+        time.sleep(3)
 
-        # -------------------------------------------------------------
-        # ⚠️ LƯU Ý: Bắt sự kiện tải file khi bấm nút Xuất dữ liệu (Export)
-        # Đổi 'button#export-btn' thành Selector thực tế nút Export của bạn
-        # -------------------------------------------------------------
-        print("3. Đang bấm nút xuất dữ liệu...")
-        with page.expect_download() as download_info:
-            page.click("button#export-btn")
+        # ------------------------------------------------------------------
+        # 2. VÒNG LẶP TẢI BÁO CÁO CHO TỪNG KHO
+        # ------------------------------------------------------------------
+        for wh in WAREHOUSES:
+            code = wh["code"]
+            prefix = wh["prefix"]
+            file_name_val = f"{prefix} {current_date_time}"
 
-        download = download_info.value
-        download_path = f"./{download.suggested_filename}"
-        download.save_as(download_path)
+            print(f"\n--- ĐANG XỬ LÝ KHO: {code.upper()} ---")
+            
+            # Mở trang báo cáo
+            page.goto(REPORT_URL)
+            page.wait_for_load_state("networkidle")
+            time.sleep(2)
+
+            # Nhập mã kho vào ô tag input
+            input_selector = "xpath=//*[@id='ma_kho']/itg-tags-input/div/div/tags-input/div/div/input"
+            page.fill(input_selector, code)
+            
+            # Bấm icon xác nhận chọn kho
+            page.click("xpath=//*[@id='ma_kho']/itg-tags-input/div/div/div/i")
+            time.sleep(2)
+
+            # Bấm nút Tìm kiếm (Search)
+            print(" -> Đang bấm Tìm kiếm...")
+            page.click("xpath=//*[@id='search']/span")
+            time.sleep(5)  # Chờ bảng dữ liệu tải
+
+            # Bấm Menu Xuất Excel
+            print(" -> Đang mở menu Export...")
+            page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/a")
+            page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/a/i")
+            page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/ul/li/a")
+
+            # Nhập tên file cần lưu
+            print(f" -> Đang nhập tên file: {file_name_val}")
+            page.click("id=fileName_ctrl")
+            page.fill("id=fileName_ctrl", file_name_val)
+            time.sleep(2)
+
+            # Bấm nút Đồng ý tải xuống trong Modal và bắt sự kiện Download
+            print(" -> Đang tải file Excel về...")
+            with page.expect_download() as download_info:
+                page.click("xpath=/html/body/div[1]/div/div/div/div[3]/button[1]")
+            
+            download = download_info.value
+            save_path = os.path.join("./downloads", f"{file_name_val}.xlsx")
+            download.save_as(save_path)
+            print(f" -> TẢI THÀNH CÔNG: {save_path}")
+
+            time.sleep(3)
 
         browser.close()
-        print(f"-> Đã tải file về máy chủ GitHub: {download_path}")
-        return download_path
-
-def upload_to_gdrive(file_path):
-    print("4. Đang đẩy file lên Google Drive...")
-    creds_dict = json.loads(GDRIVE_JSON_STR)
-    creds = Credentials.from_service_account_info(
-        creds_dict,
-        scopes=["https://www.googleapis.com/auth/drive.file"]
-    )
-    service = build("drive", "v3", credentials=creds)
-
-    file_metadata = {
-        "name": os.path.basename(file_path),
-        "parents": [GDRIVE_FOLDER_ID]
-    }
-    media = MediaFileUpload(file_path, resumable=True)
-
-    uploaded_file = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id"
-    ).execute()
-
-    print(f"-> THÀNH CÔNG! File ID trên Google Drive: {uploaded_file.get('id')}")
+        print("\n=== HOÀN THÀNH TẤT CẢ CÁC KHO ===")
 
 if __name__ == "__main__":
-    file_downloaded = download_erp_data()
-    upload_to_gdrive(file_downloaded)
+    run_automation()
