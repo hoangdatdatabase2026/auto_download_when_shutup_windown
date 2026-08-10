@@ -7,9 +7,9 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# -------------------------------------------------------------
-# CẤU HÌNH DANH SÁCH KHO VÀ ĐƯỜNG DẪN ERP
-# -------------------------------------------------------------
+# ==============================================================================
+# PHẦN 1: CẤU HÌNH DANH SÁCH KHO VÀ ĐƯỜNG DẪN HỆ THỐNG
+# ==============================================================================
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
     {"code": "khogt", "prefix": "tkkd_gt"},
@@ -19,18 +19,29 @@ WAREHOUSES = [
     {"code": "khojp", "prefix": "tkkd_jp"},
 ]
 
+# Đường dẫn trang Đăng nhập và Báo cáo Tồn khả dụng
 LOGIN_URL = os.environ.get("ERP_URL", "http://103.149.99.95:8011/Account/Login")
+REPORT_URL = "http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung"
+
+# Đọc tài khoản từ GitHub Secrets (hoặc dùng mặc định nếu chưa cài)
 ERP_USERNAME = os.environ.get("ERP_USERNAME", "HD01566")
 ERP_PASSWORD = os.environ.get("ERP_PASSWORD", "8UIa8&!v")
 
+# Đọc cấu hình Google Drive từ GitHub Secrets
 GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
 GDRIVE_JSON_STR = os.environ.get("GDRIVE_CREDENTIALS_JSON")
 
+
+# ==============================================================================
+# PHẦN 2: HÀM UPLOAD FILE TRỰC TIẾP LÊN GOOGLE DRIVE
+# ==============================================================================
 def upload_file_to_gdrive(file_path):
-    """Tự động tải file Excel hoặc ảnh lỗi lên Google Drive"""
-    print(f"   [DRIVE] Đang chuẩn bị tải lên Google Drive: {os.path.basename(file_path)}...")
+    """
+    LOGIC: Kiểm tra cấu hình Secrets -> Đăng thực thể Service Account -> Tải file lên Drive.
+    """
+    print(f"   [DRIVE] Chuẩn bị đẩy file: {os.path.basename(file_path)}...")
     if not GDRIVE_FOLDER_ID or not GDRIVE_JSON_STR:
-        print("   [DRIVE ⚠️] Chưa cấu hình Google Drive Secrets, bỏ qua upload.")
+        print("   [DRIVE ⚠️] Chưa cấu hình Google Drive Secrets trên GitHub, bỏ qua bước upload.")
         return
     try:
         creds_dict = json.loads(GDRIVE_JSON_STR)
@@ -56,17 +67,24 @@ def upload_file_to_gdrive(file_path):
     except Exception as e:
         print(f"   [DRIVE ERR ❌] Lỗi upload Google Drive: {e}")
 
+
+# ==============================================================================
+# PHẦN 3: LUỒNG TỰ ĐỘNG HÓA CHÍNH (PLAYWRIGHT)
+# ==============================================================================
 def run_automation():
     print("==================================================")
     print("🚀 BẮT ĐẦU TIẾN TRÌNH TỰ ĐỘNG HÓA ERP")
     print("==================================================")
     
     os.makedirs("./downloads", exist_ok=True)
+    
+    # Định dạng timestamp theo đúng yêu cầu: dd.mm.yyyy HHMM
     now = datetime.now()
     current_date_time = now.strftime("%d.%m.%Y %H%M")
     print(f"[THỜI GIAN] Format timestamp tạo file: {current_date_time}")
 
     with sync_playwright() as p:
+        # LOGIC: Khởi tạo trình duyệt Chromium ẩn với độ phân giải chuẩn Desktop
         print("\n[BƯỚC 1] Khởi chạy trình duyệt Chromium...")
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -74,57 +92,76 @@ def run_automation():
             viewport={"width": 1366, "height": 768}
         )
         page = context.new_page()
-        page.set_default_timeout(30000)
+        page.set_default_timeout(35000)
+        print(" -> [OK] Trình duyệt đã sẵn sàng.")
 
-        # -------------------------------------------------------------
-        # BƯỚC 1, 2 & 3: ĐĂNG NHẬP VÀ XÁC THỰC
-        # -------------------------------------------------------------
+        # ----------------------------------------------------------------------
+        # LOGIC ĐĂNG NHẬP (BƯỚC 2 & 3):
+        # 1. Truy cập trang LOGIN_URL và chờ Form load xong.
+        # 2. Điền Username & Password vào ô tương ứng.
+        # 3. Kích hoạt Submit bằng cách Click nút ĐĂNG NHẬP + Nhấn phím Enter.
+        # 4. Kiểm tra xem URL có chuyển hướng sang trang ERP nội bộ hay không.
+        # ----------------------------------------------------------------------
         print("\n[BƯỚC 2 & 3] Tiến hành đăng nhập hệ thống ERP...")
         try:
+            print(f" -> Mở trang Đăng nhập: {LOGIN_URL}")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            page.wait_for_selector("id=user_name")
-            page.fill("id=user_name", ERP_USERNAME)
-            page.fill("id=pass_word", ERP_PASSWORD)
+
+            print(f" -> Điền Tên đăng nhập: {ERP_USERNAME}")
+            page.wait_for_selector("#user_name", state="visible")
+            page.fill("#user_name", ERP_USERNAME)
             
-            print(" -> Click nút Đăng nhập...")
-            page.click("xpath=/html/body/div[3]/div[2]/div/div/form/button")
+            print(" -> Điền Mật khẩu...")
+            page.fill("#pass_word", ERP_PASSWORD)
             
-            # Chờ Menu Sidebar xuất hiện -> Khẳng định 100% đã vào được trang chủ ERP
-            print(" -> Đang chờ giao diện chính ERP (#sidebar) nạp xong...")
-            page.wait_for_selector("#sidebar", timeout=30000)
-            print(f" -> [OK ✅] ĐĂNG NHẬP THÀNH CÔNG! URL hiện tại: {page.url}")
-            time.sleep(2)
+            print(" -> Thực hiện Submit form Đăng nhập...")
+            # Click nút bấm theo selector linh hoạt
+            submit_btn = page.locator("button[type='submit'], form button, .btn-primary")
+            if submit_btn.count() > 0:
+                submit_btn.first.click()
+            else:
+                page.press("#pass_word", "Enter")
+                
+            time.sleep(1)
+            # Nhấn thêm Enter để đảm bảo sự kiện form submit kích hoạt 100%
+            page.press("#pass_word", "Enter")
+
+            print(" -> Đang chờ hệ thống xác thực phiên đăng nhập (6s)...")
+            time.sleep(6)
+
+            # LOGIC XÁC NHẬN: Kiểm tra xem URL đã thoát khỏi trang Login chưa
+            if "Account/Login" in page.url or "Login" in page.url:
+                print(f" -> [LỖI ❌] Không thể Đăng nhập. Trình duyệt vẫn ở trang Login: {page.url}")
+                page.screenshot(path="./downloads/error_login.png")
+                upload_file_to_gdrive("./downloads/error_login.png")
+                browser.close()
+                return
+            else:
+                print(f" -> [OK ✅] ĐĂNG NHẬP THÀNH CÔNG! Đã chuyển hướng tới: {page.url}")
+
         except Exception as e:
-            print(f" -> [LỖI ❌] Không vào được trang chủ ERP (#sidebar không xuất hiện). URL hiện tại: {page.url}")
-            print(f" -> Chi tiết lỗi: {e}")
+            print(f" -> [LỖI ❌] ĐĂNG NHẬP GẶP SỰ CỐ: {e}")
             page.screenshot(path="./downloads/error_login.png")
             upload_file_to_gdrive("./downloads/error_login.png")
             browser.close()
             return
 
-        # -------------------------------------------------------------
-        # BƯỚC 5: CHUYỂN TRANG BÁO CÁO NỘI BỘ QUA JS ROUTER (KHÔNG RELOAD)
-        # -------------------------------------------------------------
-        print("\n[BƯỚC 5] Chuyển tới Báo cáo Tồn khả dụng (JS Internal Router)...")
+        # ----------------------------------------------------------------------
+        # LOGIC MỞ TRANG BÁO CÁO (BƯỚC 5):
+        # Truy cập trực tiếp URL Báo cáo Tồn khả dụng sau khi đã có Session đăng nhập.
+        # ----------------------------------------------------------------------
+        print("\n[BƯỚC 5] Chuyển tới Báo cáo Tồn khả dụng...")
         try:
-            # Đổi Hash nội bộ để AngularJS tự load View mà không bị mất Session
-            page.evaluate("window.location.hash = '#/SO/Report/SOBCTonKhaDung'")
+            page.goto(REPORT_URL, wait_until="domcontentloaded")
             time.sleep(3)
-            
-            # Chờ thẻ chọn kho #ma_kho thực sự xuất hiện trên màn hình
-            print(" -> Đang chờ ô chọn kho (#ma_kho) nạp vào màn hình...")
-            page.wait_for_selector("#ma_kho", state="visible", timeout=30000)
-            print(" -> [OK ✅] Đã nạp thành công giao diện Báo cáo!")
+            print(" -> [OK ✅] Đã tải giao diện Báo cáo.")
         except Exception as e:
-            print(f" -> [LỖI ❌] Không nạp được màn hình Báo cáo: {e}")
-            page.screenshot(path="./downloads/error_report_page.png")
-            upload_file_to_gdrive("./downloads/error_report_page.png")
-            browser.close()
-            return
+            print(f" -> [CẢNH BÁO ⚠️] Lỗi nạp URL báo cáo: {e}")
 
-        # -------------------------------------------------------------
-        # BƯỚC 6 & 7: VÒNG LẶP XỬ LÝ 6 KHO
-        # -------------------------------------------------------------
+        # ----------------------------------------------------------------------
+        # LOGIC VÒNG LẶP LẤY BÁO CÁO 6 KHO (BƯỚC 6 & 7):
+        # Lần lượt chọn mã kho -> Xem báo cáo -> Mở menu Export Excel -> Tải file -> Đẩy lên Google Drive
+        # ----------------------------------------------------------------------
         print("\n==================================================")
         print("🔄 BẮT ĐẦU VÒNG LẶP XỬ LÝ 6 KHO")
         print("==================================================")
@@ -136,58 +173,60 @@ def run_automation():
 
             print(f"\n--- [{idx}/6] ĐANG XỬ LÝ KHO: {code.upper()} ---")
             try:
-                # Chuyển Route qua JS nếu từ kho thứ 2 trở đi
+                # 1. Chuyển lại URL Báo cáo cho từng kho để reset form
                 if idx > 1:
-                    page.evaluate("window.location.hash = '#/SO/Report/SOBCTonKhaDung'")
+                    page.goto(REPORT_URL, wait_until="domcontentloaded")
                     time.sleep(2)
 
-                # BƯỚC 6: Điền mã kho vào ô tag input
+                # 2. Tìm ô nhập kho và điền dữ liệu
                 input_selector = "xpath=//*[@id='ma_kho']//input"
-                page.wait_for_selector(input_selector, state="visible", timeout=20000)
+                print(f" 1. Chờ ô nhập mã kho xuất hiện...")
+                page.wait_for_selector(input_selector, state="visible", timeout=25000)
                 
-                # Xóa dữ liệu cũ và điền mã kho mới
+                print(f" 2. Điền mã kho: '{code}'")
                 page.fill(input_selector, "")
-                time.sleep(0.5)
                 page.fill(input_selector, code)
                 time.sleep(1)
                 
-                # Bấm icon chọn kho
+                # 3. Bấm icon thêm kho vào danh sách
+                print(" 3. Bấm icon chọn kho...")
                 page.click("xpath=//*[@id='ma_kho']//i")
                 time.sleep(1)
 
-                # Bấm Xem báo cáo / Tìm kiếm
-                print(" -> Bấm Xem báo cáo (Search)...")
+                # 4. Bấm Xem báo cáo / Tìm kiếm
+                print(" 4. Bấm nút Xem báo cáo (Search)...")
                 page.click("xpath=//*[@id='search']/span")
                 time.sleep(4)
 
-                # BƯỚC 7: Xuất file Excel
-                print(" -> Thao tác mở menu Export Excel...")
+                # 5. Mở Popup Export Excel
+                print(" 5. Mở menu Export Excel...")
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/a")
                 time.sleep(1)
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/a/i")
                 time.sleep(1)
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/ul/li/a")
 
-                # Điền tên file
-                print(f" -> Điền tên file: '{file_name_val}'")
+                # 6. Nhập tên file Excel cần lưu
+                print(f" 6. Điền tên file: '{file_name_val}'")
                 page.wait_for_selector("id=fileName_ctrl", state="visible")
                 page.fill("id=fileName_ctrl", file_name_val)
                 time.sleep(1)
 
-                # Bấm Tải về trong Modal
-                print(" -> Bấm nút Tải về...")
+                # 7. Bấm Tải về và bắt sự kiện expect_download của Playwright
+                print(" 7. Bấm nút Tải về...")
                 btn_ok = "xpath=/html/body/div[1]/div/div/div/div[3]/button[1]"
                 page.wait_for_selector(btn_ok, state="visible")
                 
                 with page.expect_download(timeout=40000) as download_info:
                     page.click(btn_ok)
 
+                # 8. Lưu file Excel vừa tải xuống máy chủ
                 download = download_info.value
                 save_path = os.path.join("./downloads", f"{file_name_val}.xlsx")
                 download.save_as(save_path)
-                print(f" -> [OK ✅] Tải thành công: {file_name_val}.xlsx")
+                print(f" -> [OK ✅] Tải file Excel thành công: {file_name_val}.xlsx")
 
-                # Upload trực tiếp lên Google Drive
+                # 9. Tải file Excel vừa lấy lên Google Drive
                 upload_file_to_gdrive(save_path)
 
             except Exception as ex:
@@ -195,7 +234,7 @@ def run_automation():
                 err_img = f"./downloads/error_{code}.png"
                 try:
                     page.screenshot(path=err_img)
-                    print(f" -> Đã lưu ảnh chụp màn hình lỗi: {err_img}")
+                    print(f" -> Đã lưu ảnh lỗi: {err_img}")
                     upload_file_to_gdrive(err_img)
                 except:
                     pass
@@ -203,7 +242,7 @@ def run_automation():
 
         browser.close()
         print("\n==================================================")
-        print("🎉 HOÀN THÀNH TẤT CẢ CÁC BƯỚC TỰ ĐỘNG HÓA!")
+        print("🎉 HOÀN THÀNH TOÀN BỘ TIẾN TRÌNH!")
         print("==================================================")
 
 if __name__ == "__main__":
