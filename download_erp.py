@@ -16,6 +16,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+# Đọc cấu hình từ GitHub Secrets
 ERP_USER = os.getenv("ERP_USERNAME")
 ERP_PASS = os.getenv("ERP_PASSWORD")
 GDRIVE_JSON = os.getenv("GDRIVE_CREDENTIALS_JSON")
@@ -46,7 +47,7 @@ def take_screenshot(driver, step_name):
         filename = f"{datetime.now().strftime('%H%M%S')}_{step_name}.png"
         filepath = os.path.join(SCREENSHOT_DIR, filename)
         driver.save_screenshot(filepath)
-        print_status("VISUAL SNAPSHOT", f"Da chụp ảnh màn hình: screenshots/{filename}")
+        print_status("VISUAL SNAPSHOT", f"Da chup anh man hinh: screenshots/{filename}")
     except Exception as e:
         print_status("VISUAL ERROR", f"Khong the chup anh: {str(e)}")
 
@@ -237,7 +238,7 @@ def navigate_to_report(driver, wait):
         return False
 
 def execute_export_and_download(driver, wait, new_file_name):
-    """Quy trình mở Popup Export, đổi tên file và Bấm Tải về chính xác"""
+    """Quy trình mở Popup Export, đổi tên file và Bấm Tải về"""
     print_status("EXPORT B1", "Click B1: //*[@id=\"breadcrumbs\"]/div[2]/div/a...")
     b1_elem = wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/a')))
     driver.execute_script("arguments[0].click();", b1_elem)
@@ -257,7 +258,6 @@ def execute_export_and_download(driver, wait, new_file_name):
         driver.execute_script("arguments[0].click();", b3_elem)
     time.sleep(2)
 
-    # CHỤP ẢNH MÀN HÌNH POPUP XUẤT DỮ LIỆU VỪA HIỆN RA
     take_screenshot(driver, "04_export_popup_opened")
 
     print_status("EXPORT B4", f"Dien id=fileName_ctrl voi ten: [{new_file_name}]...")
@@ -272,7 +272,6 @@ def execute_export_and_download(driver, wait, new_file_name):
     type_with_js_events(driver, file_input, new_file_name)
     time.sleep(1)
 
-    # CHỤP ẢNH XÁC NHẬN TÊN FILE ĐÃ ĐƯỢC ĐIỀN
     take_screenshot(driver, f"05_file_name_filled_{new_file_name.split()[0]}")
 
     print_status("EXPORT CONFIRM", "Nhan nut 'Tải về'...")
@@ -317,7 +316,7 @@ def run_download():
             if "SOBCTonKhaDung" not in driver.current_url:
                 navigate_to_report(driver, wait)
             
-            # 1. ĐIỀN MÃ KHO
+            # 1. ĐIỀN MÃ KHO VÀ BẤM KÍNH LÚP (KHÔNG GỬI PHÍM ENTER ĐỂ TRÁNH POPUP)
             print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
             ma_kho_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/tags-input/div/div/input'
             tag_input = wait.until(EC.presence_of_element_located((By.XPATH, ma_kho_xpath)))
@@ -325,19 +324,23 @@ def run_download():
             driver.execute_script("arguments[0].click();", tag_input)
             time.sleep(0.5)
             
+            # Điền mã kho qua event JS (không dùng send_keys ENTER)
             type_with_js_events(driver, tag_input, code)
-            tag_input.send_keys(Keys.ENTER)
             time.sleep(1)
 
+            print_status(f"3.{idx}.2", "Bam bieu tuong Kính lúp de chon kho...")
+            kinh_lup_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/div/i'
             try:
-                tag_icon = driver.find_element(By.XPATH, '//*[@id="ma_kho"]/itg-tags-input/div/div/div/i')
-                driver.execute_script("arguments[0].click();", tag_icon)
-            except Exception:
-                pass
-            time.sleep(1)
+                kinh_lup_icon = wait.until(EC.presence_of_element_located((By.XPATH, kinh_lup_xpath)))
+                driver.execute_script("arguments[0].click();", kinh_lup_icon)
+                print_status(f"3.{idx}.2 SUCCESS", f"-> Da bam kính lúp chon kho [{code}]!")
+            except Exception as e:
+                print_status(f"3.{idx}.2 WARN", f"Khong tim thay icon kính lúp, thu click truc tiep: {str(e)}")
+            
+            time.sleep(2)
             take_screenshot(driver, f"03_ma_kho_{code}")
 
-            # 2. BẤM NÚT XEM BÁO CÁO
+            # 2. BẤM NÚT XEM BÁO CÁO / SEARCH
             print_status(f"3.{idx}.3", "Nhan nut 'Xem bao cao' / Search...")
             search_btn = None
             try:
