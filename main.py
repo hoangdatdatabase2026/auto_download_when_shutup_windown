@@ -6,10 +6,10 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 # 1. Đọc dữ liệu từ biến môi trường (Secrets)
-ERP_URL = os.environ.get("ERP_URL")
-ERP_USERNAME = os.environ.get("ERP_USERNAME")
-ERP_PASSWORD = os.environ.get("ERP_PASSWORD")
-GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
+ERP_URL = os.environ.get("http://103.149.99.95:8011/Solution/ERP/#/Main/OverviewDisplay")
+ERP_USERNAME = os.environ.get("HD01566")
+ERP_PASSWORD = os.environ.get("8UIa8&!v")
+GDRIVE_FOLDER_ID = os.environ.get("1fr6RlluRTvKUQ7mFPA_-sTMF6GqPaxLA")
 GDRIVE_JSON_STR = os.environ.get("GDRIVE_CREDENTIALS_JSON")
 
 def download_erp_data():
