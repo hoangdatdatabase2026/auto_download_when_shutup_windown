@@ -2,16 +2,15 @@ name: Run ERP Auto Download
 
 on:
   schedule:
-    # Chạy lúc 7h, 9h, 11h, 13h, 15h, 17h giờ Việt Nam (00:00, 02:00, 04:00, 06:00, 08:00, 10:00 UTC)
     - cron: '0 0,2,4,6,8,10 * * *'
-  workflow_dispatch: # Cho phép bấm chạy thủ công trên GitHub
+  workflow_dispatch:
 
 jobs:
   download-job:
     runs-on: ubuntu-latest
 
     steps:
-    - name: "[GIAI DOAN 1/4] Lay ma nguon tu Repository"
+    - name: "[GIAI DOAN 1/4] Lay ma nguon"
       uses: actions/checkout@v3
 
     - name: "[GIAI DOAN 2/4] Khoi tao moitruong Python"
@@ -19,14 +18,11 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: "[GIAI DOAN 3/4] Cai dat cac thu vien (Selenium, Driver, Google Drive API)"
+    - name: "[GIAI DOAN 3/4] Cai dat thu vien"
       run: |
-        echo "--------------------------------------------------"
-        echo ">>> Dang cai dat cac thu vien phu thuoc..."
-        echo "--------------------------------------------------"
         pip install selenium webdriver-manager google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-    - name: "[GIAI DOAN 4/4] Thuc thi Script Python tai du lieu & Upload len Google Drive"
+    - name: "[GIAI DOAN 4/4] Thuc thi Script Python & Upload Google Drive"
       env:
         ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
         ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
@@ -34,3 +30,10 @@ jobs:
         GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
       run: |
         python download_erp.py
+
+    - name: "TU DONG LUU ANH MAN HINH VISUAL (DANG DEBUG)"
+      if: always() # Luon xuat anh ngay ca khi code bi loi
+      uses: actions/upload-artifact@v4
+      with:
+        name: Visual-Screenshots-Debug
+        path: screenshots/
