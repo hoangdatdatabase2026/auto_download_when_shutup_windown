@@ -29,7 +29,7 @@ def setup_driver(download_path):
     options = webdriver.ChromeOptions()
     
     # Chạy ngầm không mở giao diện trình duyệt
-    options.add_argument("--headless=new")
+    # options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
