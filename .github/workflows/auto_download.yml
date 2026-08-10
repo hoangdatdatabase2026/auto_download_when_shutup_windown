@@ -1,45 +1,32 @@
-name: ERP Data Auto Downloader
+name: Run ERP Automation
 
 on:
-  schedule:
-    # Chạy 2 tiếng/lần từ 7h - 17h (Giờ Việt Nam)
-    - cron: '0 0,2,4,6,8,10 * * *'
-
-  workflow_dispatch:
+  workflow_dispatch: # Cho phép chạy thủ công
 
 jobs:
-  run-playwright:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 1. Checkout mã nguồn
-        uses: actions/checkout@v4.2.2
+    - name: Checkout Repository
+      uses: actions/checkout@v3
 
-      - name: 2. Cài đặt môi trường Python
-        uses: actions/setup-python@v5.3.0
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      - name: 3. Cài đặt các thư viện Python
-        run: |
-          python -m pip install --upgrade pip
-          pip install playwright google-api-python-client google-auth
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install playwright google-api-python-client google-auth-httplib2 google-auth-oauthlib
+        playwright install chromium
 
-      - name: 4. Cài đặt Trình duyệt Chromium
-        run: |
-          npx playwright install chromium --with-deps
-
-      - name: 5. Chạy Script tự động tải báo cáo ERP
-        env:
-          ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
-          ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
-        run: |
-          python main.py
-
-      - name: 6. Lưu file Excel vừa tải về làm Artifact
-        if: always()
-        uses: actions/upload-artifact@v4.4.3
-        with:
-          name: Bao-Cao-Ton-Kho-${{ github.run_id }}
-          path: ./downloads/
-          retention-days: 7
+    - name: Chạy Script tự động tải báo cáo ERP
+      # ĐÂY LÀ PHẦN QUAN TRỌNG NHẤT CẦN THÊM VÀO:
+      env:
+        ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
+        ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
+      run: python main.py
