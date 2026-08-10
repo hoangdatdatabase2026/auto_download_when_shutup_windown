@@ -81,21 +81,19 @@ def run_automation():
         print(" -> [OK] Trình duyệt đã sẵn sàng.")
 
         # -------------------------------------------------------------
-        # BƯỚC 1, 2 & 3: ĐĂNG NHẬP FLEXIBLE
+        # BƯỚC 1, 2 & 3: ĐĂNG NHẬP
         # -------------------------------------------------------------
         print("\n[BƯỚC 2 & 3] Tiến hành đăng nhập hệ thống ERP...")
         try:
             print(f" -> Mở trang Đăng nhập: {LOGIN_URL}")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
 
-            print(" -> Đang điền Tên đăng nhập...")
+            print(" -> Điền thông tin Tên đăng nhập và Mật khẩu...")
             page.wait_for_selector("id=user_name")
             page.fill("id=user_name", ERP_USERNAME)
-            
-            print(" -> Đang điền Mật khẩu...")
             page.fill("id=pass_word", ERP_PASSWORD)
             
-            print(" -> Gửi yêu cầu Đăng nhập (Ấn Enter & Click)...")
+            print(" -> Gửi yêu cầu Đăng nhập...")
             page.press("id=pass_word", "Enter")
             time.sleep(1)
             try:
@@ -103,22 +101,22 @@ def run_automation():
             except:
                 pass
             
-            print(" -> Đang chờ hệ thống khởi tạo phiên làm việc (5 giây)...")
+            print(" -> Đang chờ hệ thống tạo Session đăng nhập (5s)...")
             time.sleep(5)
 
-            # Mở thử trang Báo cáo để xác nhận Đăng nhập thành công hay chưa
-            print(" -> Kiểm tra quyền truy cập bằng cách mở trang Báo cáo...")
+            # Mở trang báo cáo
+            print(" -> Mở trang Báo cáo Tồn khả dụng...")
             page.goto(REPORT_URL, wait_until="domcontentloaded")
-            time.sleep(3)
+            time.sleep(4)
 
             if "Account/Login" in page.url or "Login" in page.url:
-                print(f" -> [LỖI ❌] ĐĂNG NHẬP THẤT BẠI! Hệ thống bị đẩy ngược về trang Login. Hãy kiểm tra lại ERP_USERNAME và ERP_PASSWORD trên GitHub Secrets.")
+                print(f" -> [LỖI ❌] Bị đẩy ngược về trang Login! Kiểm tra tài khoản/mật khẩu.")
                 page.screenshot(path="./downloads/error_login.png")
                 upload_file_to_gdrive("./downloads/error_login.png")
                 browser.close()
                 return
             else:
-                print(f" -> [OK ✅] ĐĂNG NHẬP THÀNH CÔNG! Đã vào trang: {page.url}")
+                print(f" -> [OK ✅] ĐĂNG NHẬP THÀNH CÔNG! Đã vào trang Báo cáo: {page.url}")
 
         except Exception as e:
             print(f" -> [LỖI ❌] ĐĂNG NHẬP GẶP SỰ CỐ: {e}")
@@ -141,35 +139,41 @@ def run_automation():
 
             print(f"\n--- [{idx}/6] ĐANG XỬ LÝ KHO: {code.upper()} ---")
             try:
-                # 1. Mở trang báo cáo
-                print(" 1. Mở lại trang Báo cáo Tồn khả dụng...")
-                page.goto(REPORT_URL, wait_until="domcontentloaded")
-                time.sleep(2)
+                # Tải lại trang bằng page.reload() từ kho thứ 2 để AngularJS vẽ lại toàn bộ DOM
+                if idx > 1:
+                    print(" 1. Làm mới lại trang Báo cáo (Reload)...")
+                    page.reload(wait_until="domcontentloaded")
+                    time.sleep(3)
+                else:
+                    print(" 1. Đã ở sẵn trang Báo cáo.")
 
-                # 2. Tìm và điền mã kho
-                input_selector = "xpath=//*[@id='ma_kho']//input"
-                print(f" 2. Chờ ô nhập mã kho ({input_selector})...")
-                page.wait_for_selector(input_selector, state="visible", timeout=25000)
-                
-                print(f" -> Điền chuỗi mã kho: '{code}'")
+                # Chờ khung chứa #ma_kho nạp xong
+                print(" 2. Chờ khung chọn kho (#ma_kho) nạp xong...")
+                page.wait_for_selector("#ma_kho", state="visible", timeout=25000)
+                time.sleep(1)
+
+                # Nhập mã kho vào ô input bên trong #ma_kho
+                input_selector = "#ma_kho input"
+                print(f" 3. Nhập mã kho '{code}' vào ô tìm kiếm...")
+                page.wait_for_selector(input_selector, state="visible", timeout=15000)
                 page.fill(input_selector, code)
                 time.sleep(1)
                 
-                # 3. Bấm icon chọn kho
-                print(" 3. Bấm icon chọn kho (tag input)...")
-                page.click("xpath=//*[@id='ma_kho']//i")
+                # Bấm icon xác nhận chọn kho
+                print(" 4. Bấm icon xác nhận kho...")
+                page.click("#ma_kho i")
                 time.sleep(1)
                 print(" -> [OK] Đã chọn kho.")
 
-                # 4. Bấm Xem báo cáo / Tìm kiếm
-                print(" 4. Bấm nút Xem báo cáo (Search)...")
+                # Bấm Xem báo cáo / Tìm kiếm
+                print(" 5. Bấm nút Xem báo cáo (Search)...")
                 page.click("xpath=//*[@id='search']/span")
                 print(" -> Đang chờ hệ thống truy vấn dữ liệu kho...")
                 time.sleep(4)
                 print(" -> [OK] Đã hoàn tất tìm kiếm.")
 
-                # 5. Mở menu Export Excel
-                print(" 5. Thao tác mở menu Export Excel...")
+                # Mở menu Export Excel
+                print(" 6. Thao tác mở menu Export Excel...")
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/a")
                 time.sleep(1)
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/a/i")
@@ -177,14 +181,14 @@ def run_automation():
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/ul/li/a")
                 print(" -> [OK] Đã mở Popup xuất file Excel.")
 
-                # 6. Điền tên file
-                print(f" 6. Điền tên file: '{file_name_val}'")
+                # Điền tên file
+                print(f" 7. Điền tên file: '{file_name_val}'")
                 page.wait_for_selector("id=fileName_ctrl", state="visible")
                 page.fill("id=fileName_ctrl", file_name_val)
                 time.sleep(1)
 
-                # 7. Bấm nút Tải về
-                print(" 7. Bấm nút xác nhận Tải về...")
+                # Bấm nút Tải về
+                print(" 8. Bấm nút xác nhận Tải về...")
                 btn_ok = "xpath=/html/body/div[1]/div/div/div/div[3]/button[1]"
                 page.wait_for_selector(btn_ok, state="visible")
                 
@@ -196,7 +200,7 @@ def run_automation():
                 download.save_as(save_path)
                 print(f" -> [OK ✅] Đã tải file Excel về máy chủ thành công: {file_name_val}.xlsx")
 
-                # 8. Upload lên Google Drive
+                # Upload lên Google Drive
                 upload_file_to_gdrive(save_path)
 
             except Exception as ex:
