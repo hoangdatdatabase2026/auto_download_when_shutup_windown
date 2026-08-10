@@ -25,7 +25,7 @@ GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
 GDRIVE_JSON_STR = os.environ.get("GDRIVE_CREDENTIALS_JSON")
 
 def upload_file_to_gdrive(file_path):
-    """Đẩy trực tiếp file Excel hoặc ảnh chụp lỗi lên Google Drive"""
+    """Tự động tải file Excel hoặc ảnh chụp lỗi lên Google Drive"""
     if not GDRIVE_FOLDER_ID or not GDRIVE_JSON_STR:
         print(" ⚠️ Chưa cấu hình Google Drive Secrets, bỏ qua upload.")
         return
@@ -70,22 +70,23 @@ def run_automation():
         page.set_default_timeout(30000)
 
         # -------------------------------------------------------------
-        # BƯỚC 1: ĐĂNG NHẬP (Dùng phím ENTER để Submit Form)
+        # BƯỚC 1: ĐĂNG NHẬP
         # -------------------------------------------------------------
         try:
             print(f"2. Truy cập trang đăng nhập: {LOGIN_URL}")
-            page.goto(LOGIN_URL)
+            # wait_until="domcontentloaded" để không bị treo ở trang login
+            page.goto(LOGIN_URL, wait_until="domcontentloaded")
             
             page.wait_for_selector("id=user_name")
             page.fill("id=user_name", ERP_USERNAME)
             page.fill("id=pass_word", ERP_PASSWORD)
             
-            print("3. Gửi thông tin Đăng nhập (Nhấn Enter)...")
+            print("3. Bấm Đăng nhập (Enter)...")
             page.press("id=pass_word", "Enter")
             
-            # Chờ 5 giây để hệ thống tạo Session đăng nhập
-            time.sleep(5)
-            print(" -> Đã gửi yêu cầu đăng nhập!")
+            # Chờ 4 giây để hệ thống thiết lập Session
+            time.sleep(4)
+            print(" -> Đã gửi thông tin đăng nhập!")
         except Exception as e:
             print(f"❌ LỖI ĐĂNG NHẬP: {e}")
             page.screenshot(path="./downloads/error_login.png")
@@ -94,14 +95,21 @@ def run_automation():
             return
 
         # -------------------------------------------------------------
-        # BƯỚC 2: CHUYỂN THẲNG TỚI TRANG BÁO CÁO
+        # BƯỚC 2: CHUYỂN TỚI TRANG BÁO CÁO (Dùng wait_until="commit")
         # -------------------------------------------------------------
         try:
             print(f"4. Chuyển hướng tới trang Báo cáo: {REPORT_URL}")
-            page.goto(REPORT_URL)
-            time.sleep(4)
+            # Dùng wait_until="commit" để bỏ qua việc chờ load ngầm vô tận
+            page.goto(REPORT_URL, wait_until="commit")
+            
+            # Chờ đúng ô nhập kho xuất hiện trên màn hình
+            print(" -> Đang chờ giao diện Báo cáo nạp...")
+            page.wait_for_selector("#ma_kho input", timeout=30000)
+            print(" -> Đã mở thành công trang Báo cáo!")
         except Exception as e:
             print(f"❌ LỖI MỞ TRANG BÁO CÁO: {e}")
+            page.screenshot(path="./downloads/error_report_page.png")
+            upload_file_to_gdrive("./downloads/error_report_page.png")
             browser.close()
             return
 
@@ -117,30 +125,29 @@ def run_automation():
             print(f"⚡ ĐANG XỬ LÝ KHO: {code.upper()}")
             print(f"==========================================")
             try:
-                # Mở trang báo cáo nếu URL bị lệch
-                if page.url != REPORT_URL:
-                    page.goto(REPORT_URL)
-                    time.sleep(3)
+                # Đảm bảo đang ở trang báo cáo
+                if "SOBCTonKhaDung" not in page.url:
+                    page.goto(REPORT_URL, wait_until="commit")
+                    time.sleep(2)
 
-                # Điền mã kho
+                # 1. Tìm và điền mã kho
                 input_selector = "#ma_kho input"
-                print(" -> Đang tìm ô nhập mã kho...")
-                page.wait_for_selector(input_selector, state="visible", timeout=20000)
+                page.wait_for_selector(input_selector, state="visible", timeout=15000)
                 
                 print(f" -> Điền mã kho: {code}")
                 page.fill(input_selector, code)
                 time.sleep(1)
                 
-                # Bấm icon chọn kho
+                # 2. Bấm icon chọn kho
                 page.click("#ma_kho i")
                 time.sleep(1)
 
-                # Bấm nút Tìm kiếm
+                # 3. Bấm nút Tìm kiếm
                 print(" -> Bấm Tìm kiếm...")
                 page.click("xpath=//*[@id='search']/span")
                 time.sleep(4)
 
-                # Mở menu Export Excel
+                # 4. Mở menu Export Excel
                 print(" -> Mở menu Export...")
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/a")
                 time.sleep(1)
@@ -148,13 +155,13 @@ def run_automation():
                 time.sleep(1)
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/ul/li/a")
 
-                # Nhập tên file
+                # 5. Nhập tên file
                 print(f" -> Đặt tên file: {file_name_val}")
                 page.wait_for_selector("id=fileName_ctrl", state="visible")
                 page.fill("id=fileName_ctrl", file_name_val)
                 time.sleep(1)
 
-                # Bấm nút Tải về trong Modal
+                # 6. Bấm nút Tải về trong Popup Modal
                 print(" -> Bấm Tải về...")
                 btn_ok = "xpath=/html/body/div[1]/div/div/div/div[3]/button[1]"
                 page.wait_for_selector(btn_ok, state="visible")
@@ -165,14 +172,13 @@ def run_automation():
                 download = download_info.value
                 save_path = os.path.join("./downloads", f"{file_name_val}.xlsx")
                 download.save_as(save_path)
-                print(f" ✅ Đã tải file: {file_name_val}.xlsx")
+                print(f" ✅ Đã tải thành công: {file_name_val}.xlsx")
 
                 # Upload trực tiếp lên Google Drive
                 upload_file_to_gdrive(save_path)
 
             except Exception as ex:
                 print(f" ❌ Lỗi khi xử lý kho {code.upper()}: {ex}")
-                # Nếu bị lỗi, chụp ảnh giao diện gửi lên Drive để kiểm tra
                 err_img = f"./downloads/error_{code}.png"
                 try:
                     page.screenshot(path=err_img)
@@ -182,7 +188,7 @@ def run_automation():
                 continue
 
         browser.close()
-        print("\n=== HOÀN THÀNH TIẾN TRÌNH ===")
+        print("\n=== HOÀN THÀNH TẤT CẢ ===")
 
 if __name__ == "__main__":
     run_automation()
