@@ -119,65 +119,97 @@ def setup_driver(download_path):
     print_status("BUOC 1/4", "Khoi tao Chrome thanh cong.")
     return driver
 
+def type_with_js_events(driver, element, value):
+    """Gõ phím và bắn event JS để Angular/React ghi nhận dữ liệu input"""
+    element.clear()
+    element.send_keys(value)
+    driver.execute_script("""
+        var elem = arguments[0];
+        elem.dispatchEvent(new Event('input', { bubbles: true }));
+        elem.dispatchEvent(new Event('change', { bubbles: true }));
+        elem.dispatchEvent(new Event('blur', { bubbles: true }));
+    """, element)
+
+def handle_modal_popup(driver):
+    """Tự động kiểm tra và click nút 'CÓ' / 'CO' nếu ERP hiện popup cảnh báo đăng nhập đè phiên"""
+    time.sleep(2)
+    confirm_words = ["CO", "CÓ", "Có", "có", "Xác nhận", "OK", "Yes"]
+    for word in confirm_words:
+        try:
+            buttons = driver.find_elements(By.XPATH, f"//button[contains(text(), '{word}')] | //span[contains(text(), '{word}')] | //a[contains(text(), '{word}')]")
+            for btn in buttons:
+                if btn.is_displayed():
+                    print_status("MODAL POPUP", f"-> Phat hien Popup xac nhan! Dang bam nut '{word}'...")
+                    driver.execute_script("arguments[0].click();", btn)
+                    time.sleep(2)
+                    return True
+        except Exception:
+            pass
+    return False
+
 def perform_login_with_retry(driver, wait, max_retries=3):
-    """Hàm đăng nhập có vòng lặp thử lại tối đa max_retries lần"""
+    """Thực hiện đăng nhập và tự động xử lý Popup xác nhận CÓ"""
     print("\n" + "-"*50, flush=True)
     print_status("BUOC 2/4", "TIEN HANH DANG NHAP HE THONG ERP")
 
     for attempt in range(1, max_retries + 1):
-        print_status(f"LAN DANG NHAP {attempt}/{max_retries}", f"Dang mo trang Login: http://103.149.99.95:8011/Account/Login")
+        print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Dang mo trang Login: http://103.149.99.95:8011/Account/Login")
         
         try:
             driver.get("http://103.149.99.95:8011/Account/Login")
             time.sleep(3)
 
-            # Điền tài khoản & mật khẩu
             user_input = wait.until(EC.presence_of_element_located((By.ID, "user_name")))
             pass_input = driver.find_element(By.ID, "pass_word")
 
-            user_input.click()
-            user_input.clear()
-            user_input.send_keys(ERP_USER if ERP_USER else "")
-            
-            pass_input.click()
-            pass_input.clear()
-            pass_input.send_keys(ERP_PASS if ERP_PASS else "")
+            # Điền thông tin kèm kích hoạt Event JS
+            type_with_js_events(driver, user_input, ERP_USER if ERP_USER else "")
+            type_with_js_events(driver, pass_input, ERP_PASS if ERP_PASS else "")
             time.sleep(1)
 
-            print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Gửi lệnh đăng nhập (Click / Submit)...")
+            print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Gui lenh Dang nhap...")
             
-            # Thử kích hoạt đăng nhập theo nhiều cách
             login_clicked = False
             try:
-                # 1. Tìm nút submit trong form
-                login_btn = driver.find_element(By.XPATH, "//form//button | //button[@type='submit']")
+                login_btn = driver.find_element(By.XPATH, "//form//button | //button[@type='submit'] | //button[contains(text(),'Đăng nhập')]")
                 driver.execute_script("arguments[0].click();", login_btn)
                 login_clicked = True
             except Exception:
                 pass
 
             if not login_clicked:
-                # 2. Bấm Enter ở ô password
                 pass_input.send_keys(Keys.RETURN)
 
-            print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Cho he thong kiem tra thong tin va dieu huong URL...")
+            # Kiểm tra Popup "CÓ" (Modal đè phiên)
+            handle_modal_popup(driver)
+
+            print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Kiem tra dieu huong trang...")
             
-            # Chờ đổi trang tối đa 20s
             start_time = time.time()
-            while time.time() - start_time < 20:
+            while time.time() - start_time < 18:
                 curr_url = driver.current_url
                 if "OverviewDisplay" in curr_url or "Solution/ERP/#" in curr_url:
-                    print_status("DANG NHAP THANH CONG", f"-> DA DEN DUNG PAGE: {curr_url}")
+                    print_status("DANG NHAP THANH CONG", f"-> DA DEN DUNG PAGE TARGET: {curr_url}")
                     return True
+                # Thử tìm lại popup nếu xuất hiện trễ
+                handle_modal_popup(driver)
                 time.sleep(2)
 
             curr_url = driver.current_url
-            print_status("THAT BAI", f"Lan {attempt} thất bại. Trình duyệt vẫn dừng ở: {curr_url}")
+            print_status("THAT BAI", f"Lan {attempt} dung tai URL: {curr_url}")
+            
+            # In ra văn bản thực tế đang xuất hiện trên màn hình web để kiểm tra
+            try:
+                body_text = driver.find_element(By.TAG_NAME, "body").text
+                clean_text = " ".join(body_text.split())[:250]
+                print_status("NOI DUNG WEB", f"Text hien thi tren web: '{clean_text}'")
+            except Exception:
+                pass
 
         except Exception as e:
-            print_status("LOI THAO TAC", f"Lỗi trong quá trình đăng nhập lần {attempt}: {str(e)}")
+            print_status("LOI THAO TAC", f"Loi lan {attempt}: {str(e)}")
 
-        time.sleep(3) # Chờ 3s trước khi thử lại
+        time.sleep(3)
 
     return False
 
@@ -189,18 +221,16 @@ def run_download():
     driver = setup_driver(DOWNLOAD_DIR)
     wait = WebDriverWait(driver, 30)
     
-    # --- BƯỚC 2: THỰC HIỆN ĐĂNG NHẬP VỚI RETRY ---
     login_success = perform_login_with_retry(driver, wait, max_retries=3)
 
     if not login_success:
         print("\n" + "!"*70, flush=True)
         print_status("FATAL ERROR", "DANG NHAP THAT BAI SAU 3 LAN THU LAI!")
-        print_status("FATAL ERROR", "STOP CODE: DUNG TIEN TRINH CHU DONG DE TRANH CHAY LOI HOAT DONG KET TIEP.")
+        print_status("FATAL ERROR", "STOP CODE: DUNG TIEN TRINH CHU DONG DE KHOI CHAY CAI CAC BOCK TIEP THEO.")
         print("!"*70 + "\n", flush=True)
         driver.quit()
-        sys.exit(1) # Báo lỗi cho GitHub Actions để dừng ngay tại đây
+        sys.exit(1)
 
-    # --- BƯỚC 3: DUYỆT QUA TỪNG KHO ---
     current_time_str = datetime.now().strftime("%d.%m.%Y %H%M")
     total_warehouses = len(WAREHOUSES)
 
