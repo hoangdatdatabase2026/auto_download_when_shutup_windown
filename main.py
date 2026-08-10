@@ -1,11 +1,27 @@
 import os
 import json
 import time
+import traceback
 from datetime import datetime
-from playwright.sync_api import sync_playwright
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+
+# Đọc cấu hình từ GitHub Secrets
+ERP_USER = os.getenv("ERP_USERNAME")
+ERP_PASS = os.getenv("ERP_PASSWORD")
+GDRIVE_JSON = os.getenv("GDRIVE_CREDENTIALS_JSON")
+FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID")
+
+OVERVIEW_URL = "http://103.149.99.95:8011/Solution/ERP/#/Main/OverviewDisplay"
 
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
@@ -16,186 +32,243 @@ WAREHOUSES = [
     {"code": "khojp", "prefix": "tkkd_jp"},
 ]
 
-LOGIN_URL = "http://103.149.99.95:8011/Account/Login"
-REPORT_URL = "http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung"
+DOWNLOAD_DIR = os.path.abspath("./downloads")
 
-ERP_USERNAME = os.environ.get("ERP_USERNAME") or "HD01566"
-ERP_PASSWORD = os.environ.get("ERP_PASSWORD") or "8UIa8&!v"
+def print_status(step, message):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] [{step}] {message}", flush=True)
 
-GDRIVE_RAW_INPUT = os.environ.get("GDRIVE_FOLDER_ID")
-GDRIVE_JSON_STR = os.environ.get("GDRIVE_CREDENTIALS_JSON")
+def list_downloaded_files():
+    if not os.path.exists(DOWNLOAD_DIR):
+        return []
+    return [f for f in os.listdir(DOWNLOAD_DIR) if os.path.isfile(os.path.join(DOWNLOAD_DIR, f)) and not f.endswith('.crdownload')]
 
-def get_clean_folder_id(raw_input):
-    """Tự động lọc lấy ID thư mục nếu người dùng lỡ dán cả đường link URL"""
-    if not raw_input:
-        return None
-    if "drive.google.com" in raw_input:
-        # Tách lấy phần ID ở cuối đường link URL
-        return raw_input.split("/")[-1].split("?")[0]
-    return raw_input.strip()
-
-def upload_file_to_gdrive(file_path):
-    print(f"   [DRIVE] Đang chuẩn bị tải lên Google Drive: {os.path.basename(file_path)}...")
+def upload_files_to_gdrive(download_dir, folder_id):
+    print("\n" + "="*70, flush=True)
+    print_status("BUOC 4/4", "BAT DAU UPLOAD FILE LEN GOOGLE DRIVE")
+    print("="*70, flush=True)
     
-    clean_folder_id = get_clean_folder_id(GDRIVE_RAW_INPUT)
-    
-    if not clean_folder_id or not GDRIVE_JSON_STR:
-        print("   [DRIVE ⚠️] Chưa cấu hình Google Drive Secrets, bỏ qua upload.")
+    if not GDRIVE_JSON or not folder_id:
+        print_status("LOI DRIVE", "Thieu GDRIVE_CREDENTIALS_JSON hoac GDRIVE_FOLDER_ID!")
         return
+
     try:
-        creds_dict = json.loads(GDRIVE_JSON_STR)
-        creds = Credentials.from_service_account_info(
-            creds_dict,
-            scopes=["https://www.googleapis.com/auth/drive.file"]
-        )
-        service = build("drive", "v3", credentials=creds)
+        creds_dict = json.loads(GDRIVE_JSON)
+        scopes = ['https://www.googleapis.com/auth/drive']
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        service = build('drive', 'v3', credentials=creds)
 
-        file_metadata = {
-            "name": os.path.basename(file_path),
-            "parents": [clean_folder_id]
-        }
-        mimetype = "image/png" if file_path.endswith(".png") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        media = MediaFileUpload(file_path, mimetype=mimetype)
+        files = list_downloaded_files()
+        total_files = len(files)
+        print_status("DRIVE INFO", f"Phat hien {total_files} file Excel trong thu muc cho upload.")
 
-        uploaded_file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id"
-        ).execute()
-        print(f"   [DRIVE OK ✅] Đã upload thành công (Vào thư mục ID: {clean_folder_id})")
-    except Exception as e:
-        print(f"   [DRIVE ERR ❌] Lỗi upload Google Drive: {e}")
-
-def run_automation():
-    print("==================================================")
-    print("🚀 BẮT ĐẦU TIẾN TRÌNH TỰ ĐỘNG HÓA ERP")
-    print("==================================================")
-    
-    os.makedirs("./downloads", exist_ok=True)
-    now = datetime.now()
-    current_date_time = now.strftime("%d.%m.%Y %H%M")
-
-    with sync_playwright() as p:
-        print("\n[BƯỚC 1] Khởi chạy trình duyệt Chromium...")
-        browser = p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
-        context = browser.new_context(
-            accept_downloads=True, 
-            viewport={"width": 1366, "height": 768},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-        page.set_default_timeout(35000)
-
-        # -------------------------------------------------------------
-        # BƯỚC 2 & 3: ĐĂNG NHẬP
-        # -------------------------------------------------------------
-        print("\n[BƯỚC 2 & 3] Tiến hành đăng nhập...")
-        try:
-            page.goto(LOGIN_URL, wait_until="networkidle")
-            time.sleep(2)
-
-            print(f" -> Nhập Username: {ERP_USERNAME}")
-            page.click("#user_name")
-            page.type("#user_name", ERP_USERNAME, delay=100)
-
-            print(" -> Nhập Password...")
-            page.click("#pass_word")
-            page.type("#pass_word", ERP_PASSWORD, delay=100)
-            time.sleep(1)
-
-            print(" -> Bấm nút ĐĂNG NHẬP...")
-            page.click("button:has-text('ĐĂNG NHẬP')")
-            page.press("#pass_word", "Enter")
-            
-            print(" -> Đang chờ xác thực (8 giây)...")
-            time.sleep(8)
-
-            if "Account/Login" in page.url or "Login" in page.url:
-                print(f"\n❌ [LỖI ĐĂNG NHẬP] Vẫn ở trang Login: {page.url}")
-                page.screenshot(path="./downloads/error_login.png")
-                upload_file_to_gdrive("./downloads/error_login.png")
-                browser.close()
-                return
-            else:
-                print(f" -> [OK ✅] ĐĂNG NHẬP THÀNH CÔNG! Đã vào: {page.url}")
-
-        except Exception as e:
-            print(f" -> [LỖI ❌] SỰ CỐ ĐĂNG NHẬP: {e}")
-            page.screenshot(path="./downloads/error_login.png")
-            upload_file_to_gdrive("./downloads/error_login.png")
-            browser.close()
+        if total_files == 0:
+            print_status("CANH BAO", "Khong co file nao trong thu muc de upload!")
             return
 
-        # -------------------------------------------------------------
-        # BƯỚC 5: CHUYỂN TỚI TRANG BÁO CÁO
-        # -------------------------------------------------------------
-        print("\n[BƯỚC 5] Chuyển tới Báo cáo Tồn khả dụng...")
-        page.goto(REPORT_URL, wait_until="domcontentloaded")
+        for idx, file_name in enumerate(files, 1):
+            file_path = os.path.join(download_dir, file_name)
+            file_size_kb = round(os.path.getsize(file_path) / 1024, 2)
+            print_status("UPLOADING", f"[{idx}/{total_files}] Dang upload: {file_name} ({file_size_kb} KB)...")
+            
+            file_metadata = {
+                'name': file_name,
+                'parents': [folder_id]
+            }
+            media = MediaFileUpload(
+                file_path, 
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                resumable=True
+            )
+            uploaded_file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+            print_status("UPLOAD SUCCESS", f"Thanh cong! File ID Drive: {uploaded_file.get('id')}")
+            
+        print_status("BUOC 4/4", "HOAN THANH TOAN BO TIEN TRINH UPLOAD!")
+
+    except Exception as e:
+        print_status("LOI UPLOAD", f"Loi khi ket noi Google Drive API: {str(e)}")
+        traceback.print_exc()
+
+def setup_driver(download_path):
+    print_status("BUOC 1/4", "KHOI TAO TRINH DUYET CHROME HEADLESS...")
+    os.makedirs(download_path, exist_ok=True)
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    
+    prefs = {
+        "download.default_directory": download_path,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "safebrowsing.enabled": True
+    }
+    options.add_experimental_option("prefs", prefs)
+    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    print_status("BUOC 1/4", "Khoi tao Chrome thanh cong.")
+    return driver
+
+def run_download():
+    print("="*70, flush=True)
+    print_status("START", "BAT DAU TIEN TRINH TU DONG HOA CHAY NGAM")
+    print("="*70, flush=True)
+    
+    driver = setup_driver(DOWNLOAD_DIR)
+    wait = WebDriverWait(driver, 30)
+    
+    # --- BƯỚC 2: ĐĂNG NHẬP ---
+    try:
+        print("\n" + "-"*50, flush=True)
+        print_status("BUOC 2/4", "DANG NHAP HE THONG ERP")
+        print_status("2.1", "Truy cap URL Dang nhap: http://103.149.99.95:8011/Account/Login")
+        driver.get("http://103.149.99.95:8011/Account/Login")
         time.sleep(3)
 
-        # -------------------------------------------------------------
-        # BƯỚC 6 & 7: VÒNG LẶP XỬ LÝ 6 KHO
-        # -------------------------------------------------------------
-        for idx, wh in enumerate(WAREHOUSES, 1):
-            code = wh["code"]
-            prefix = wh["prefix"]
-            file_name_val = f"{prefix} {current_date_time}"
+        print_status("2.2", f"Dien tai khoan user: [{ERP_USER}]...")
+        user_input = wait.until(EC.presence_of_element_located((By.ID, "user_name")))
+        pass_input = driver.find_element(By.ID, "pass_word")
+        
+        user_input.clear()
+        user_input.send_keys(ERP_USER if ERP_USER else "")
+        pass_input.clear()
+        pass_input.send_keys(ERP_PASS if ERP_PASS else "")
+        time.sleep(1)
 
-            print(f"\n--- [{idx}/6] ĐANG XỬ LÝ KHO: {code.upper()} ---")
+        print_status("2.3", "Thuc hien kich hoat nut Dang nhap (JS Click + Submit)...")
+        login_submitted = False
+        try:
+            # Thu tim va click bang JavaScript de khong bi chan Event
+            login_btn = driver.find_element(By.XPATH, "//button[contains(@class, 'btn') or @type='submit']")
+            driver.execute_script("arguments[0].click();", login_btn)
+            login_submitted = True
+        except Exception:
+            pass
+            
+        if not login_submitted:
+            pass_input.send_keys(Keys.RETURN)
+
+        print_status("2.4", "Dang cho he thong dieu huong sang trang Overview...")
+        
+        # Cho toi khi URL thay doi chua chuoi 'OverviewDisplay' hoac 'Solution/ERP' (Toi da 25s)
+        try:
+            WebDriverWait(driver, 25).until(
+                lambda d: "OverviewDisplay" in d.current_url or "Solution/ERP" in d.current_url
+            )
+        except Exception:
+            pass
+
+        time.sleep(3)
+        current_url = driver.current_url
+        print_status("2.5 CHECK URL", f"URL hien tai cua trinh duyet: {current_url}")
+
+        # KIỂM TRA CHÍNH XÁC PAGE MAIN OVERVIEW
+        if "OverviewDisplay" in current_url or current_url.rstrip('/') == OVERVIEW_URL.rstrip('/'):
+            print_status("2.5 CHECK LOGIN", f"-> XAC NHAN: DA DANG NHAP THANH CONG!")
+            print_status("2.5 CHECK LOGIN", f"-> HIEN DANG O TRANG TARGET: {OVERVIEW_URL}")
+        elif "Solution/ERP" in current_url:
+            print_status("2.5 CHECK LOGIN", "-> XAC NHAN: DA DANG NHAP THANH CONG (Giao dien ERP General)!")
+        else:
+            print_status("2.5 CHECK LOGIN", f"-> CANH BAO: DANG NHAP THAT BAI! Trinh duyet van dung o: {current_url}")
+            print_status("2.5 CHECK LOGIN", "Kiem tra lai ERP_USERNAME va ERP_PASSWORD trong GitHub Secrets.")
+            driver.quit()
+            return
+
+    except Exception as e:
+        print_status("LOI BUOC 2", f"Khong the dang nhap: {str(e)}")
+        traceback.print_exc()
+        driver.quit()
+        return
+
+    # --- BƯỚC 3: DUYỆT QUA TỪNG KHO ---
+    current_time_str = datetime.now().strftime("%d.%m.%Y %H%M")
+    total_warehouses = len(WAREHOUSES)
+
+    print("\n" + "="*70, flush=True)
+    print_status("BUOC 3/4", f"BAT DAU XU LY TAI BAO CAO CHO {total_warehouses} KHO")
+    print("="*70, flush=True)
+
+    for idx, item in enumerate(WAREHOUSES, 1):
+        code = item["code"]
+        prefix = item["prefix"]
+        file_name = f"{prefix} {current_time_str}"
+        
+        print(f"\n>>> [KHO {idx}/{total_warehouses}] KHO: {code.upper()} | TEN FILE DU KIEN: {file_name}", flush=True)
+        
+        try:
+            print_status(f"3.{idx}.1", "Mo URL Bao cao Ton kha dung...")
+            driver.get("http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung")
+            time.sleep(5)
+            
+            print_status(f"3.{idx}.1 STATUS", f"URL hien tai: {driver.current_url}")
+
+            print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
+            tag_input = wait.until(EC.presence_of_element_located((By.XPATH, '//div[@id="ma_kho"]//input')))
+            tag_input.clear()
+            tag_input.send_keys(code)
+            tag_input.send_keys(Keys.ENTER)
+            time.sleep(1)
+            print_status(f"3.{idx}.2 SUCCESS", f"-> Da dien '{code}' vao o ma_kho!")
+
             try:
-                if idx > 1:
-                    page.goto(REPORT_URL, wait_until="domcontentloaded")
-                    time.sleep(2)
+                tag_icon = driver.find_element(By.XPATH, '//*[@id="ma_kho"]/itg-tags-input/div/div/div/i')
+                tag_icon.click()
+            except Exception:
+                pass
+            time.sleep(2)
 
-                input_selector = "xpath=//*[@id='ma_kho']//input"
-                page.wait_for_selector(input_selector, state="visible", timeout=25000)
-                
-                page.click(input_selector)
-                page.fill(input_selector, "")
-                page.type(input_selector, code, delay=50)
-                time.sleep(1)
-                
-                page.click("xpath=//*[@id='ma_kho']//i")
-                time.sleep(1)
+            print_status(f"3.{idx}.3", "Nhan nut 'Tim kiem'...")
+            search_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="search"]/span')))
+            search_btn.click()
+            time.sleep(5)
+            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem.")
 
-                page.click("xpath=//*[@id='search']/span")
-                time.sleep(4)
+            print_status(f"3.{idx}.4", "Mo Breadcrumb & Menu Export Excel...")
+            btn_breadcrumb = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/a')))
+            btn_breadcrumb.click()
+            time.sleep(1.5)
 
-                page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/a")
-                time.sleep(1)
-                page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/a/i")
-                time.sleep(1)
-                page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/ul/li/a")
+            btn_export_icon = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i')))
+            btn_export_icon.click()
+            time.sleep(1.5)
 
-                page.wait_for_selector("id=fileName_ctrl", state="visible")
-                page.fill("id=fileName_ctrl", file_name_val)
-                time.sleep(1)
+            btn_export_link = wait.until(EC.element_to_be_clickable((By.LINK_TEXT, 'Export Excel')))
+            btn_export_link.click()
+            time.sleep(2)
 
-                btn_ok = "xpath=/html/body/div[1]/div/div/div/div[3]/button[1]"
-                page.wait_for_selector(btn_ok, state="visible")
-                
-                with page.expect_download(timeout=40000) as download_info:
-                    page.click(btn_ok)
+            print_status(f"3.{idx}.5", f"Dien ten file moi: [{file_name}] va Xac nhan...")
+            file_name_input = wait.until(EC.presence_of_element_located((By.ID, "fileName_ctrl")))
+            file_name_input.clear()
+            file_name_input.send_keys(file_name)
+            time.sleep(1)
 
-                download = download_info.value
-                save_path = os.path.join("./downloads", f"{file_name_val}.xlsx")
-                download.save_as(save_path)
-                print(f" -> [OK ✅] Tải thành công: {file_name_val}.xlsx")
+            confirm_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1]')))
+            confirm_btn.click()
+            print_status(f"3.{idx}.5 SUCCESS", f"-> Da gui lenh tai file [{file_name}]. Cho 12 giay...")
+            
+            time.sleep(12)
 
-                upload_file_to_gdrive(save_path)
+            current_files = list_downloaded_files()
+            print_status(f"3.{idx}.6 CHECK FILE", f"Tong so file trong thu muc local: {len(current_files)}")
+            for f in current_files:
+                if prefix in f:
+                    size_kb = round(os.path.getsize(os.path.join(DOWNLOAD_DIR, f)) / 1024, 2)
+                    print_status(f"3.{idx}.6 CHECK FILE", f"-> TAI THANH CONG: '{f}' ({size_kb} KB)")
 
-            except Exception as ex:
-                print(f" -> [LỖI KHO {code.upper()} ❌] {ex}")
-                err_img = f"./downloads/error_{code}.png"
-                try:
-                    page.screenshot(path=err_img)
-                    upload_file_to_gdrive(err_img)
-                except:
-                    pass
-                continue
+        except Exception as e:
+            print_status(f"LOI KHO {code.upper()}", f"Khong the tai kho {code}: {str(e)}")
+            traceback.print_exc()
 
-        browser.close()
-        print("\n🎉 HOÀN THÀNH TOÀN BỘ TIẾN TRÌNH!")
+    print_status("BUOC 3/4", "HOAN THANH TIEN TRINH DUYET CAC KHO!")
+    driver.quit()
+
+    upload_files_to_gdrive(DOWNLOAD_DIR, FOLDER_ID)
 
 if __name__ == "__main__":
-    run_automation()
+    run_download()
