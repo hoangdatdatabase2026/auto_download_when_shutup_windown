@@ -16,7 +16,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# Đọc cấu hình từ GitHub Secrets
 ERP_USER = os.getenv("ERP_USERNAME")
 ERP_PASS = os.getenv("ERP_PASSWORD")
 GDRIVE_JSON = os.getenv("GDRIVE_CREDENTIALS_JSON")
@@ -34,10 +33,22 @@ WAREHOUSES = [
 ]
 
 DOWNLOAD_DIR = os.path.abspath("./downloads")
+SCREENSHOT_DIR = os.path.abspath("./screenshots")
 
 def print_status(step, message):
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] [{step}] {message}", flush=True)
+
+def take_screenshot(driver, step_name):
+    """Lưu ảnh màn hình thực tế vào thư mục screenshots"""
+    try:
+        os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        filename = f"{datetime.now().strftime('%H%M%S')}_{step_name}.png"
+        filepath = os.path.join(SCREENSHOT_DIR, filename)
+        driver.save_screenshot(filepath)
+        print_status("VISUAL SNAPSHOT", f"Da chụp ảnh màn hình: screenshots/{filename}")
+    except Exception as e:
+        print_status("VISUAL ERROR", f"Khong the chup anh: {str(e)}")
 
 def list_downloaded_files():
     if not os.path.exists(DOWNLOAD_DIR):
@@ -163,8 +174,6 @@ def perform_login_with_retry(driver, wait, max_retries=3):
             type_with_js_events(driver, pass_input, ERP_PASS if ERP_PASS else "")
             time.sleep(1)
 
-            print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Gui lenh Dang nhap...")
-            
             login_clicked = False
             try:
                 login_btn = driver.find_element(By.XPATH, "//form//button | //button[@type='submit'] | //button[contains(text(),'Đăng nhập')]")
@@ -178,25 +187,22 @@ def perform_login_with_retry(driver, wait, max_retries=3):
 
             handle_modal_popup(driver)
 
-            print_status(f"LAN DANG NHAP {attempt}/{max_retries}", "Kiem tra dieu huong trang...")
-            
             start_time = time.time()
             while time.time() - start_time < 18:
                 curr_url = driver.current_url
                 if "OverviewDisplay" in curr_url or "Solution/ERP/#" in curr_url:
                     print_status("DANG NHAP THANH CONG", f"-> DA DEN DUNG PAGE TARGET: {curr_url}")
+                    take_screenshot(driver, "01_login_success")
                     return True
                 handle_modal_popup(driver)
                 time.sleep(2)
-
-            curr_url = driver.current_url
-            print_status("THAT BAI", f"Lan {attempt} dung tai URL: {curr_url}")
 
         except Exception as e:
             print_status("LOI THAO TAC", f"Loi lan {attempt}: {str(e)}")
 
         time.sleep(3)
 
+    take_screenshot(driver, "01_login_failed")
     return False
 
 def navigate_to_report(driver, wait):
@@ -206,7 +212,7 @@ def navigate_to_report(driver, wait):
     time.sleep(3)
 
     if "SOBCTonKhaDung" in driver.current_url:
-        print_status("NAVIGATE SUCCESS", f"Da den thuc te trang Bieu mau qua Direct URL: {driver.current_url}")
+        take_screenshot(driver, "02_report_page_direct")
         return True
 
     print_status("NAVIGATE FALLBACK", "Khong the chuyen huong thuc te, tien hanh click Sidebar Menu...")
@@ -223,30 +229,26 @@ def navigate_to_report(driver, wait):
         driver.execute_script("arguments[0].click();", target_report_btn)
         time.sleep(4)
 
-        print_status("SIDEBAR SUCCESS", f"URL hien tai sau khi click Sidebar: {driver.current_url}")
+        take_screenshot(driver, "02_report_page_sidebar")
         return True
     except Exception as e:
         print_status("SIDEBAR ERROR", f"Loi khi thao tac Sidebar Menu: {str(e)}")
+        take_screenshot(driver, "02_report_page_error")
         return False
 
 def execute_export_and_download(driver, wait, new_file_name):
-    """Thực hiện chính xác quy trình 4 bước từ UI Vision:
-    B1: Click xpath=//*[@id="breadcrumbs"]/div[2]/div/a
-    B2: Click xpath=//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i
-    B3: Click Export Excel (xpath=//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/ul/li/a)
-    B4: Clear id=fileName_ctrl, điền tên file mới và bấm Tải về
-    """
-    print_status("EXPORT B1", "Click xpath=//*[@id=\"breadcrumbs\"]/div[2]/div/a...")
+    """Quy trình mở Popup Export, đổi tên file và Bấm Tải về chính xác"""
+    print_status("EXPORT B1", "Click B1: //*[@id=\"breadcrumbs\"]/div[2]/div/a...")
     b1_elem = wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/a')))
     driver.execute_script("arguments[0].click();", b1_elem)
     time.sleep(1)
 
-    print_status("EXPORT B2", "Click xpath=//*[@id=\"breadcrumbs\"]/div[2]/div/ul/li[3]/a/i...")
+    print_status("EXPORT B2", "Click B2: //*[@id=\"breadcrumbs\"]/div[2]/div/ul/li[3]/a/i...")
     b2_elem = wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i')))
     driver.execute_script("arguments[0].click();", b2_elem)
     time.sleep(1)
 
-    print_status("EXPORT B3", "Click Export Excel...")
+    print_status("EXPORT B3", "Click B3: Export Excel...")
     try:
         b3_elem = wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/ul/li/a')))
         driver.execute_script("arguments[0].click();", b3_elem)
@@ -255,8 +257,11 @@ def execute_export_and_download(driver, wait, new_file_name):
         driver.execute_script("arguments[0].click();", b3_elem)
     time.sleep(2)
 
+    # CHỤP ẢNH MÀN HÌNH POPUP XUẤT DỮ LIỆU VỪA HIỆN RA
+    take_screenshot(driver, "04_export_popup_opened")
+
     print_status("EXPORT B4", f"Dien id=fileName_ctrl voi ten: [{new_file_name}]...")
-    file_input = wait.until(EC.presence_of_element_located((By.ID, "fileName_ctrl")))
+    file_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@id='fileName_ctrl'] | //div[contains(@class,'modal')]//input")))
     
     file_input.click()
     file_input.send_keys(Keys.CONTROL + "a")
@@ -267,10 +272,15 @@ def execute_export_and_download(driver, wait, new_file_name):
     type_with_js_events(driver, file_input, new_file_name)
     time.sleep(1)
 
-    print_status("EXPORT CONFIRM", "Nhan nut 'Tải về' (/html/body/div[1]/div/div/div/div[3]/button[1])...")
-    confirm_btn = wait.until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1]')))
+    # CHỤP ẢNH XÁC NHẬN TÊN FILE ĐÃ ĐƯỢC ĐIỀN
+    take_screenshot(driver, f"05_file_name_filled_{new_file_name.split()[0]}")
+
+    print_status("EXPORT CONFIRM", "Nhan nut 'Tải về'...")
+    confirm_btn = wait.until(EC.presence_of_element_located((
+        By.XPATH, "//button[contains(text(),'Tải về')] | //button[contains(text(),'Tai ve')] | /html/body/div[1]/div/div/div/div[3]/button[1] | //div[contains(@class,'modal')]//button[contains(@class,'btn-primary')]"
+    )))
     driver.execute_script("arguments[0].click();", confirm_btn)
-    print_status("EXPORT SUCCESS", f"Da gui lenh tai [{new_file_name}]. Cho 15 giây hoàn tất...")
+    print_status("EXPORT SUCCESS", f"Da gui lenh tai [{new_file_name}]. Cho 15s...")
 
 def run_download():
     print("="*70, flush=True)
@@ -283,10 +293,7 @@ def run_download():
     login_success = perform_login_with_retry(driver, wait, max_retries=3)
 
     if not login_success:
-        print("\n" + "!"*70, flush=True)
         print_status("FATAL ERROR", "DANG NHAP THAT BAI SAU 3 LAN THU LAI!")
-        print_status("FATAL ERROR", "STOP CODE: DUNG TIEN TRINH CHU DONG.")
-        print("!"*70 + "\n", flush=True)
         driver.quit()
         sys.exit(1)
 
@@ -308,15 +315,11 @@ def run_download():
         
         try:
             if "SOBCTonKhaDung" not in driver.current_url:
-                print_status(f"3.{idx}.0 RE-NAVIGATE", "Trang bi lech, tien hanh dieu huong lai trang Bieu mau...")
                 navigate_to_report(driver, wait)
             
-            print_status(f"3.{idx}.1 STATUS", f"URL hien tai: {driver.current_url}")
-
-            # ĐIỀN MÃ KHO
+            # 1. ĐIỀN MÃ KHO
             print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
             ma_kho_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/tags-input/div/div/input'
-            
             tag_input = wait.until(EC.presence_of_element_located((By.XPATH, ma_kho_xpath)))
             
             driver.execute_script("arguments[0].click();", tag_input)
@@ -325,16 +328,16 @@ def run_download():
             type_with_js_events(driver, tag_input, code)
             tag_input.send_keys(Keys.ENTER)
             time.sleep(1)
-            print_status(f"3.{idx}.2 SUCCESS", f"-> Da dien '{code}' vao o ma_kho!")
 
             try:
                 tag_icon = driver.find_element(By.XPATH, '//*[@id="ma_kho"]/itg-tags-input/div/div/div/i')
                 driver.execute_script("arguments[0].click();", tag_icon)
             except Exception:
                 pass
-            time.sleep(2)
+            time.sleep(1)
+            take_screenshot(driver, f"03_ma_kho_{code}")
 
-            # BẤM NÚT "Xem báo cáo" / Search
+            # 2. BẤM NÚT XEM BÁO CÁO
             print_status(f"3.{idx}.3", "Nhan nut 'Xem bao cao' / Search...")
             search_btn = None
             try:
@@ -344,15 +347,13 @@ def run_download():
                 
             driver.execute_script("arguments[0].click();", search_btn)
             
-            # Đợi DÚNG 60 GIÂY CHO HỆ THỐNG TẢI DỮ LIỆU BÁO CÁO
-            print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem/Xem bao cao. Dang cho 40s de he thong tai xong du lieu bao cao...")
+            print_status(f"3.{idx}.3 SUCCESS", "Dang cho 40s de he thong tai xong du lieu bao cao...")
             time.sleep(40)
 
-            # THỰC HIỆN CHÍNH XÁC QUY TRÌNH EXPORT 4 BƯỚC
+            # 3. EXPORT & DOWNLOAD
             execute_export_and_download(driver, wait, file_name)
             time.sleep(15)
 
-            # KIỂM TRA FILE ĐÃ TẢI VỀ THÀNH CÔNG CHƯA
             current_files = list_downloaded_files()
             print_status(f"3.{idx}.6 CHECK FILE", f"Tong so file trong thu muc local: {len(current_files)}")
             for f in current_files:
@@ -362,6 +363,7 @@ def run_download():
 
         except Exception as e:
             print_status(f"LOI KHO {code.upper()}", f"Khong the tai kho {code}: {str(e)}")
+            take_screenshot(driver, f"ERROR_{code}")
             traceback.print_exc()
 
     print_status("BUOC 3/4", "HOAN THANH TIEN TRINH DUYET CAC KHO!")
