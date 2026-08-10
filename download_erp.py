@@ -14,11 +14,11 @@ from webdriver_manager.chrome import ChromeDriverManager
 # Danh sách cấu hình các kho
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
-    {"code": "khogt", "prefix": "tkkd_gt"},
-    {"code": "khoak", "prefix": "tkkd_ak"},
-    {"code": "khosg", "prefix": "tkkd_hcm"},
-    {"code": "khovc", "prefix": "tkkd_vc"},
-    {"code": "khojp", "prefix": "tkkd_jp"},
+    # {"code": "khogt", "prefix": "tkkd_gt"},
+    # {"code": "khoak", "prefix": "tkkd_ak"},
+    # {"code": "khosg", "prefix": "tkkd_hcm"},
+    # {"code": "khovc", "prefix": "tkkd_vc"},
+    # {"code": "khojp", "prefix": "tkkd_jp"},
 ]
 
 # Thư mục lưu mặc định (có thể đè qua biến môi trường khi chạy trên Github)
