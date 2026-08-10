@@ -7,9 +7,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# -------------------------------------------------------------
-# CẤU HÌNH DANH SÁCH KHO VÀ THÔNG TIN TÀI KHOẢN
-# -------------------------------------------------------------
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
     {"code": "khogt", "prefix": "tkkd_gt"},
@@ -22,17 +19,27 @@ WAREHOUSES = [
 LOGIN_URL = "http://103.149.99.95:8011/Account/Login"
 REPORT_URL = "http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung"
 
-# Đặt cứng tài khoản/mật khẩu để đảm bảo không bị rỗng do GitHub Secrets
 ERP_USERNAME = os.environ.get("ERP_USERNAME") or "HD01566"
 ERP_PASSWORD = os.environ.get("ERP_PASSWORD") or "8UIa8&!v"
 
-GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
+GDRIVE_RAW_INPUT = os.environ.get("GDRIVE_FOLDER_ID")
 GDRIVE_JSON_STR = os.environ.get("GDRIVE_CREDENTIALS_JSON")
 
+def get_clean_folder_id(raw_input):
+    """Tự động lọc lấy ID thư mục nếu người dùng lỡ dán cả đường link URL"""
+    if not raw_input:
+        return None
+    if "drive.google.com" in raw_input:
+        # Tách lấy phần ID ở cuối đường link URL
+        return raw_input.split("/")[-1].split("?")[0]
+    return raw_input.strip()
+
 def upload_file_to_gdrive(file_path):
-    """Tự động tải file Excel hoặc ảnh lỗi lên Google Drive"""
     print(f"   [DRIVE] Đang chuẩn bị tải lên Google Drive: {os.path.basename(file_path)}...")
-    if not GDRIVE_FOLDER_ID or not GDRIVE_JSON_STR:
+    
+    clean_folder_id = get_clean_folder_id(GDRIVE_RAW_INPUT)
+    
+    if not clean_folder_id or not GDRIVE_JSON_STR:
         print("   [DRIVE ⚠️] Chưa cấu hình Google Drive Secrets, bỏ qua upload.")
         return
     try:
@@ -45,7 +52,7 @@ def upload_file_to_gdrive(file_path):
 
         file_metadata = {
             "name": os.path.basename(file_path),
-            "parents": [GDRIVE_FOLDER_ID]
+            "parents": [clean_folder_id]
         }
         mimetype = "image/png" if file_path.endswith(".png") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         media = MediaFileUpload(file_path, mimetype=mimetype)
@@ -55,7 +62,7 @@ def upload_file_to_gdrive(file_path):
             media_body=media,
             fields="id"
         ).execute()
-        print(f"   [DRIVE OK ✅] Đã upload thành công (ID: {uploaded_file.get('id')})")
+        print(f"   [DRIVE OK ✅] Đã upload thành công (Vào thư mục ID: {clean_folder_id})")
     except Exception as e:
         print(f"   [DRIVE ERR ❌] Lỗi upload Google Drive: {e}")
 
@@ -67,46 +74,40 @@ def run_automation():
     os.makedirs("./downloads", exist_ok=True)
     now = datetime.now()
     current_date_time = now.strftime("%d.%m.%Y %H%M")
-    print(f"[THỜI GIAN] Timestamp: {current_date_time}")
 
     with sync_playwright() as p:
         print("\n[BƯỚC 1] Khởi chạy trình duyệt Chromium...")
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
         context = browser.new_context(
             accept_downloads=True, 
-            viewport={"width": 1366, "height": 768}
+            viewport={"width": 1366, "height": 768},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = context.new_page()
         page.set_default_timeout(35000)
 
         # -------------------------------------------------------------
-        # BƯỚC 2 & 3: ĐĂNG NHẬP CHUẨN ĐÃ FIX Ô NHẬP TEXT
+        # BƯỚC 2 & 3: ĐĂNG NHẬP
         # -------------------------------------------------------------
         print("\n[BƯỚC 2 & 3] Tiến hành đăng nhập...")
         try:
-            print(f" -> Mở trang Đăng nhập: {LOGIN_URL}")
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
+            page.goto(LOGIN_URL, wait_until="networkidle")
             time.sleep(2)
 
-            print(f" -> Điền Tên đăng nhập: {ERP_USERNAME}")
-            user_input = page.wait_for_selector("#user_name", state="visible")
-            user_input.click()
-            user_input.fill(ERP_USERNAME)
-            user_input.dispatch_event("input")
-            user_input.dispatch_event("change")
+            print(f" -> Nhập Username: {ERP_USERNAME}")
+            page.click("#user_name")
+            page.type("#user_name", ERP_USERNAME, delay=100)
 
-            print(" -> Điền Mật khẩu...")
-            pass_input = page.wait_for_selector("#pass_word", state="visible")
-            pass_input.click()
-            pass_input.fill(ERP_PASSWORD)
-            pass_input.dispatch_event("input")
-            pass_input.dispatch_event("change")
+            print(" -> Nhập Password...")
+            page.click("#pass_word")
+            page.type("#pass_word", ERP_PASSWORD, delay=100)
             time.sleep(1)
 
             print(" -> Bấm nút ĐĂNG NHẬP...")
-            page.click("button:has-text('ĐĂNG NHẬP'), button[type='submit'], .btn-primary")
+            page.click("button:has-text('ĐĂNG NHẬP')")
+            page.press("#pass_word", "Enter")
             
-            print(" -> Đang chờ xác thực phiên làm việc (8 giây)...")
+            print(" -> Đang chờ xác thực (8 giây)...")
             time.sleep(8)
 
             if "Account/Login" in page.url or "Login" in page.url:
@@ -135,10 +136,6 @@ def run_automation():
         # -------------------------------------------------------------
         # BƯỚC 6 & 7: VÒNG LẶP XỬ LÝ 6 KHO
         # -------------------------------------------------------------
-        print("\n==================================================")
-        print("🔄 BẮT ĐẦU VÒNG LẶP XỬ LÝ 6 KHO")
-        print("==================================================")
-
         for idx, wh in enumerate(WAREHOUSES, 1):
             code = wh["code"]
             prefix = wh["prefix"]
@@ -155,7 +152,7 @@ def run_automation():
                 
                 page.click(input_selector)
                 page.fill(input_selector, "")
-                page.fill(input_selector, code)
+                page.type(input_selector, code, delay=50)
                 time.sleep(1)
                 
                 page.click("xpath=//*[@id='ma_kho']//i")
