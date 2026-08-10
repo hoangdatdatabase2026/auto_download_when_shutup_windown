@@ -1,4 +1,5 @@
 import os
+import json
 import time
 from datetime import datetime
 from selenium import webdriver
@@ -9,6 +10,17 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
+# Thư viện đẩy file lên Google Drive
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
+# Đọc cấu hình từ GitHub Secrets
+ERP_USER = os.getenv("ERP_USERNAME")
+ERP_PASS = os.getenv("ERP_PASSWORD")
+GDRIVE_JSON = os.getenv("GDRIVE_CREDENTIALS_JSON")
+FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID")
+
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
     {"code": "khogt", "prefix": "tkkd_gt"},
@@ -18,8 +30,41 @@ WAREHOUSES = [
     {"code": "khojp", "prefix": "tkkd_jp"},
 ]
 
-# Thư mục lưu file tạm trên máy chủ GitHub
 DOWNLOAD_DIR = os.path.abspath("./downloads")
+
+def upload_files_to_gdrive(download_dir, folder_id):
+    """Đẩy từng file Excel lên Google Drive"""
+    if not GDRIVE_JSON or not folder_id:
+        print("[!] Thieu GDRIVE_CREDENTIALS_JSON hoac GDRIVE_FOLDER_ID. Bo qua upload.")
+        return
+
+    print("\n[+] Bat dau upload file len Google Drive...")
+    try:
+        creds_dict = json.loads(GDRIVE_JSON)
+        scopes = ['https://www.googleapis.com/auth/drive']
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        service = build('drive', 'v3', credentials=creds)
+
+        for file_name in os.listdir(download_dir):
+            file_path = os.path.join(download_dir, file_name)
+            if os.path.isfile(file_path):
+                file_metadata = {
+                    'name': file_name,
+                    'parents': [folder_id]
+                }
+                media = MediaFileUpload(
+                    file_path, 
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    resumable=True
+                )
+                uploaded_file = service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
+                ).execute()
+                print(f"[✓] Da upload thanh cong: {file_name} (ID: {uploaded_file.get('id')})")
+    except Exception as e:
+        print(f"[!] Loi khi upload Google Drive: {str(e)}")
 
 def setup_driver(download_path):
     os.makedirs(download_path, exist_ok=True)
@@ -52,9 +97,9 @@ def run_download():
         pass_input = driver.find_element(By.ID, "pass_word")
         
         user_input.clear()
-        user_input.send_keys("HD01566")
+        user_input.send_keys(ERP_USER)
         pass_input.clear()
-        pass_input.send_keys("8UIa8&!v")
+        pass_input.send_keys(ERP_PASS)
         
         try:
             login_btn = driver.find_element(By.XPATH, "//form//button")
@@ -114,13 +159,15 @@ def run_download():
             confirm_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1]')))
             confirm_btn.click()
             
-            print(f"[✓] Da gui lenh tai: {file_name}")
+            print(f"[✓] Da tai xong file temp: {file_name}")
             time.sleep(10)
 
     except Exception as e:
-        print(f"[!] Loi: {str(e)}")
+        print(f"[!] Loi trong qua trinh truy cap ERP: {str(e)}")
     finally:
         driver.quit()
+
+    upload_files_to_gdrive(DOWNLOAD_DIR, FOLDER_ID)
 
 if __name__ == "__main__":
     run_download()
