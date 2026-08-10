@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# Danh sách 6 kho và tiền tố tên file tương ứng
+# Danh sách 6 kho
 WAREHOUSES = [
     {"code": "khoda", "prefix": "tkkd_da"},
     {"code": "khogt", "prefix": "tkkd_gt"},
@@ -17,11 +17,10 @@ WAREHOUSES = [
     {"code": "khojp", "prefix": "tkkd_jp"},
 ]
 
-# BƯỚC 1: Khai báo đường dẫn trang Đăng nhập và Báo cáo đích
 LOGIN_URL = os.environ.get("ERP_URL", "http://103.149.99.95:8011/Account/Login")
+ERP_MAIN_URL = "http://103.149.99.95:8011/Solution/ERP/#/"
 REPORT_URL = "http://103.149.99.95:8011/Solution/ERP/#/SO/Report/SOBCTonKhaDung"
 
-# BƯỚC 2: Tài khoản & Mật khẩu
 ERP_USERNAME = os.environ.get("ERP_USERNAME", "HD01566")
 ERP_PASSWORD = os.environ.get("ERP_PASSWORD", "8UIa8&!v")
 
@@ -60,7 +59,6 @@ def upload_file_to_gdrive(file_path):
 def run_automation():
     os.makedirs("./downloads", exist_ok=True)
     
-    # BƯỚC 4: Tạo giá trị ngày giờ hiện tại theo format dd.mm.yyyy HHmm
     now = datetime.now()
     current_date_time = now.strftime("%d.%m.%Y %H%M")
     print(f"-> Định dạng thời gian tạo file: {current_date_time}")
@@ -75,7 +73,7 @@ def run_automation():
         page = context.new_page()
         page.set_default_timeout(35000)
 
-        # BƯỚC 1, 2 & 3: ĐĂNG NHẬP ERP
+        # BƯỚC 1, 2 & 3: ĐĂNG NHẬP
         try:
             print(f"2. Truy cập trang đăng nhập: {LOGIN_URL}")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
@@ -84,9 +82,12 @@ def run_automation():
             page.fill("id=user_name", ERP_USERNAME)
             page.fill("id=pass_word", ERP_PASSWORD)
             
-            print("3. Bấm Đăng nhập...")
+            print("3. Bấm nút Đăng nhập...")
             page.click("xpath=/html/body/div[3]/div[2]/div/div/form/button")
-            time.sleep(4)
+            
+            # Chờ chuyển hướng hoàn tất sau đăng nhập
+            print(" -> Đang chờ hệ thống xử lý đăng nhập...")
+            time.sleep(5)
             print(" -> Đăng nhập thành công!")
         except Exception as e:
             print(f"❌ LỖI ĐĂNG NHẬP: {e}")
@@ -95,22 +96,23 @@ def run_automation():
             browser.close()
             return
 
-        # BƯỚC 5: TRUY CẬP TRANG BÁO CÁO TỒN KHẢ DỤNG
+        # BƯỚC 5: NẠP KHIÊN GIAO DIỆN CHÍNH ERP RỒI MỚI VÀO BÁO CÁO
         try:
-            print(f"5. Chuyển hướng tới vị trí lấy dữ liệu: {REPORT_URL}")
+            print(f"5. Mở trang Báo cáo Tồn khả dụng...")
             page.goto(REPORT_URL, wait_until="domcontentloaded")
             time.sleep(3)
             
-            # Thử thao tác Click Sidebar (Kho vận -> Báo cáo -> Báo cáo tồn khả dụng)
+            # Kiểm tra xem giao diện đã load chưa, nếu chưa sẽ thử click qua Sidebar
             try:
-                page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/a", timeout=3000)
-                time.sleep(1)
-                page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/ul/li[7]/a", timeout=3000)
-                time.sleep(1)
-                page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/ul/li[7]/ul/li[10]/a", timeout=3000)
-                time.sleep(2)
+                page.wait_for_selector("#ma_kho", timeout=10000)
             except:
-                pass
+                print(" -> Nạp lại giao diện qua Sidebar...")
+                page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/a", timeout=5000)
+                time.sleep(1)
+                page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/ul/li[7]/a", timeout=5000)
+                time.sleep(1)
+                page.click("xpath=//*[@id='sidebar']/div/ul/li[5]/ul/li[7]/ul/li[10]/a", timeout=5000)
+                time.sleep(3)
         except Exception as e:
             print(f"⚠️ Lỗi điều hướng báo cáo: {e}")
 
@@ -124,20 +126,21 @@ def run_automation():
             print(f"⚡ BƯỚC 6 & 7: XỬ LÝ KHO: {code.upper()}")
             print(f"==========================================")
             try:
-                # Mở trang báo cáo mới cho mỗi vòng lặp
+                # Đảm bảo trang báo cáo được mở lại mượt mà
                 page.goto(REPORT_URL, wait_until="domcontentloaded")
                 time.sleep(2)
 
-                # BƯỚC 6: Điền tên kho vào ô Lookup / Tag input
-                input_selector = "xpath=//*[@id='ma_kho']/itg-tags-input/div/div/tags-input/div/div/input"
-                page.wait_for_selector(input_selector, state="visible", timeout=20000)
+                # BƯỚC 6: Sử dụng Selector rút gọn linh hoạt cho ô nhập kho
+                input_selector = "#ma_kho input"
+                print(" -> Đang tìm ô nhập mã kho (#ma_kho input)...")
+                page.wait_for_selector(input_selector, state="visible", timeout=25000)
                 
                 print(f" -> Điền mã kho: {code}")
                 page.fill(input_selector, code)
                 time.sleep(1)
                 
-                # Bấm icon xác nhận kho
-                page.click("xpath=//*[@id='ma_kho']/itg-tags-input/div/div/div/i")
+                # Bấm icon cộng/chọn kho
+                page.click("#ma_kho i")
                 time.sleep(1)
 
                 # Bấm Xem báo cáo / Tìm kiếm
@@ -153,13 +156,13 @@ def run_automation():
                 time.sleep(1)
                 page.click("xpath=//*[@id='breadcrumbs']/div[2]/div/ul/li[3]/ul/li/a")
 
-                # Điền tên file theo chuẩn (Ví dụ: tkkd_da 10.08.2026 1102)
+                # Điền tên file
                 print(f" -> Điền tên file: {file_name_val}")
                 page.wait_for_selector("id=fileName_ctrl", state="visible")
                 page.fill("id=fileName_ctrl", file_name_val)
                 time.sleep(1)
 
-                # Bấm xác nhận Tải về
+                # Bấm Tải về
                 print(" -> Bấm Tải về...")
                 btn_ok = "xpath=/html/body/div[1]/div/div/div/div[3]/button[1]"
                 page.wait_for_selector(btn_ok, state="visible")
@@ -172,7 +175,7 @@ def run_automation():
                 download.save_as(save_path)
                 print(f" ✅ Đã tải file: {file_name_val}.xlsx")
 
-                # Tải file trực tiếp lên Google Drive
+                # Tải file lên Google Drive
                 upload_file_to_gdrive(save_path)
 
             except Exception as ex:
