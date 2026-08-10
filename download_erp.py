@@ -199,6 +199,43 @@ def perform_login_with_retry(driver, wait, max_retries=3):
 
     return False
 
+def navigate_to_report(driver, wait):
+    """Thử chuyển hướng thẳng, nếu bị kẹt ở OverviewDisplay thì bấm cây Sidebar Menu"""
+    print_status("NAVIGATE", "Dang thu chuyen huong thuc te toi trang Bieu mau...")
+    driver.get(REPORT_URL)
+    driver.execute_script("window.location.hash = '#/SO/Report/SOBCTonKhaDung';")
+    time.sleep(3)
+
+    if "SOBCTonKhaDung" in driver.current_url:
+        print_status("NAVIGATE SUCCESS", f"Da den thuc te trang Bieu mau qua Direct URL: {driver.current_url}")
+        return True
+
+    print_status("NAVIGATE FALLBACK", "Khong the chuyen huong thuc te, tien hanh click Sidebar Menu...")
+    try:
+        # 1. Click Menu 'Kho vận'
+        print_status("SIDEBAR 1/3", "Click Menu 'Kho vận'...")
+        kho_van_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sidebar"]/div/ul/li[5]/a')))
+        driver.execute_script("arguments[0].click();", kho_van_btn)
+        time.sleep(2)
+
+        # 2. Click Submenu 'Báo cáo'
+        print_status("SIDEBAR 2/3", "Click Submenu 'Báo cáo'...")
+        bao_cao_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sidebar"]/div/ul/li[5]/ul/li[7]/a')))
+        driver.execute_script("arguments[0].click();", bao_cao_btn)
+        time.sleep(2)
+
+        # 3. Click Submenu 'Báo cáo tồn khả dụng'
+        print_status("SIDEBAR 3/3", "Click Submenu 'Báo cáo tồn khả dụng'...")
+        target_report_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sidebar"]/div/ul/li[5]/ul/li[7]/ul/li[10]/a')))
+        driver.execute_script("arguments[0].click();", target_report_btn)
+        time.sleep(4)
+
+        print_status("SIDEBAR SUCCESS", f"URL hien tai sau khi click Sidebar: {driver.current_url}")
+        return True
+    except Exception as e:
+        print_status("SIDEBAR ERROR", f"Loi khi thao tac Sidebar Menu: {str(e)}")
+        return False
+
 def run_download():
     print("="*70, flush=True)
     print_status("START", "BAT DAU TIEN TRINH TU DONG HOA CHAY NGAM")
@@ -224,11 +261,8 @@ def run_download():
     print_status("BUOC 3/4", f"BAT DAU XU LY TAI BAO CAO CHO {total_warehouses} KHO")
     print("="*70, flush=True)
 
-    # ĐIỀU HƯỚNG SANG TRANG BÁO CÁO TỒN KHẢ DỤNG QUA ANGULAR ROUTER
-    print_status("3.0 ROUTING", f"Chuyen huong Angular Route sang trang Bieu mau: {REPORT_URL}")
-    driver.get(REPORT_URL)
-    driver.execute_script("window.location.hash = '#/SO/Report/SOBCTonKhaDung';")
-    time.sleep(5)
+    # ĐIỀU HƯỚNG TỚI TRANG BÁO CÁO (THẲNG HOẶC QUA SIDEBAR)
+    navigate_to_report(driver, wait)
 
     for idx, item in enumerate(WAREHOUSES, 1):
         code = item["code"]
@@ -238,22 +272,19 @@ def run_download():
         print(f"\n>>> [KHO {idx}/{total_warehouses}] KHO: {code.upper()} | TEN FILE DU KIEN: {file_name}", flush=True)
         
         try:
-            # Đảm bảo trang đã load đúng vị trí Báo cáo Tồn kho
-            if "#/SO/Report/SOBCTonKhaDung" not in driver.current_url:
-                print_status(f"3.{idx}.1", "Mo URL Bao cao Ton kha dung...")
-                driver.get(REPORT_URL)
-                driver.execute_script("window.location.hash = '#/SO/Report/SOBCTonKhaDung';")
-                time.sleep(4)
+            # Nếu vì lý do gì đó trang bị lệch khỏi Báo cáo, gọi hàm chuyển hướng lại
+            if "SOBCTonKhaDung" not in driver.current_url:
+                print_status(f"3.{idx}.0 RE-NAVIGATE", "Trang bi lech, tien hanh dieu huong lai trang Bieu mau...")
+                navigate_to_report(driver, wait)
             
             print_status(f"3.{idx}.1 STATUS", f"URL hien tai: {driver.current_url}")
 
-            # ĐIỀN MÃ KHO THEO XPATH CHÍNH XÁC DO BẠN CUNG CẤP
+            # ĐIỀN MÃ KHO THEO XPATH
             print_status(f"3.{idx}.2", f"Tim o 'ma_kho' va nhap ma [{code}]...")
             ma_kho_xpath = '//*[@id="ma_kho"]/itg-tags-input/div/div/tags-input/div/div/input'
             
             tag_input = wait.until(EC.presence_of_element_located((By.XPATH, ma_kho_xpath)))
             
-            # Click trực tiếp để activate ô tags-input
             driver.execute_script("arguments[0].click();", tag_input)
             time.sleep(0.5)
             
