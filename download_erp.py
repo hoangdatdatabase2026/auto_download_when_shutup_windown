@@ -120,6 +120,7 @@ def setup_driver(download_path):
     return driver
 
 def type_with_js_events(driver, element, value):
+    """Gõ chữ và kích hoạt Angular event binding"""
     element.clear()
     element.send_keys(value)
     driver.execute_script("""
@@ -229,51 +230,84 @@ def navigate_to_report(driver, wait):
         print_status("SIDEBAR ERROR", f"Loi khi thao tac Sidebar Menu: {str(e)}")
         return False
 
-def trigger_export_excel_popup(driver, wait):
-    print_status("EXPORT POPUP", "Dang kiem tra va kich hoat Popup Export Excel...")
+def open_export_excel_popup(driver, wait):
+    """Bật Popup 'XUẤT DỮ LIỆU'"""
+    print_status("EXPORT POPUP", "Dang thuc hien chuoi click de bat Popup 'XUAT DU LIEU'...")
     
-    # 1. Thử click trực tiếp vào chữ 'Export Excel' nếu đã hiển thị sẵn
+    # 1. Click nut Breadcrumb menu
     try:
-        direct_links = driver.find_elements(By.XPATH, "//a[contains(text(),'Export Excel')] | //button[contains(text(),'Export Excel')]")
-        for link in direct_links:
-            driver.execute_script("arguments[0].click();", link)
-            time.sleep(1.5)
-            if len(driver.find_elements(By.ID, "fileName_ctrl")) > 0:
-                return True
+        bc_btn = driver.find_element(By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/a | //*[@id="breadcrumbs"]//a')
+        driver.execute_script("arguments[0].click();", bc_btn)
+        time.sleep(1)
     except Exception:
         pass
 
-    # 2. Thử click các menu dropdown trên thanh Breadcrumbs
-    possible_xpaths = [
-        '//*[@id="breadcrumbs"]//a[contains(@class,"dropdown")]',
-        '//*[@id="breadcrumbs"]//ul/li[contains(@class,"open")]/ul/li/a',
-        '//*[@id="breadcrumbs"]//i[contains(@class,"excel") or contains(@class,"export") or contains(@class,"share")]/..',
-        '//*[@id="breadcrumbs"]/div[2]/div/a',
-        '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i',
-        '//*[@id="breadcrumbs"]//ul/li[3]/a'
-    ]
-
-    for xp in possible_xpaths:
-        try:
-            elements = driver.find_elements(By.XPATH, xp)
-            for elem in elements:
-                driver.execute_script("arguments[0].click();", elem)
-                time.sleep(1)
-                
-                sub_exports = driver.find_elements(By.XPATH, "//a[contains(text(),'Export Excel')]")
-                for sub in sub_exports:
-                    driver.execute_script("arguments[0].click();", sub)
-                    time.sleep(1.5)
-                    if len(driver.find_elements(By.ID, "fileName_ctrl")) > 0:
-                        return True
-        except Exception:
-            pass
-
+    # 2. Click Icon Share/Export
     try:
-        wait.until(EC.presence_of_element_located((By.ID, "fileName_ctrl")))
-        return True
+        export_icon = driver.find_element(By.XPATH, '//*[@id="breadcrumbs"]/div[2]/div/ul/li[3]/a/i | //*[@id="breadcrumbs"]//ul/li[3]/a')
+        driver.execute_script("arguments[0].click();", export_icon)
+        time.sleep(1)
     except Exception:
+        pass
+
+    # 3. Click link 'Export Excel'
+    try:
+        export_link = driver.find_element(By.XPATH, "//a[contains(text(),'Export Excel')] | //*[contains(text(),'Export Excel')]")
+        driver.execute_script("arguments[0].click();", export_link)
+        time.sleep(2)
+    except Exception:
+        pass
+
+    # Kiểm tra Modal 'XUẤT DỮ LIỆU' đã xuất hiện chưa
+    try:
+        wait_modal = WebDriverWait(driver, 10)
+        wait_modal.until(EC.presence_of_element_located((
+            By.XPATH, "//div[contains(@class,'modal')]//button[contains(text(),'Tải về')] | //*[contains(text(),'XUẤT DỮ LIỆU')] | //input[@id='fileName_ctrl']"
+        )))
+        print_status("EXPORT POPUP SUCCESS", "Da mo Popup 'XUAT DU LIEU' thanh cong!")
+        return True
+    except Exception as e:
+        print_status("EXPORT POPUP FAIL", f"Khong mo duoc Popup Xuat du lieu: {str(e)}")
         return False
+
+def process_file_download(driver, wait, new_file_name):
+    """Xóa tên mặc định 'Báo cáo tồn khả dụng', điền tên mới và bấm 'Tải về'"""
+    print_status("DOWNLOAD STEP", f"Dang xu ly ten file va tai ve: [{new_file_name}]...")
+    
+    # Tim o nhap 'Tên file'
+    file_input = wait.until(EC.presence_of_element_located((
+        By.XPATH, "//input[@id='fileName_ctrl'] | //div[contains(@class,'modal')]//input[@type='text']"
+    )))
+    
+    file_input.click()
+    time.sleep(0.5)
+
+    # 1. XÓA TRIỆT ĐỂ CHỮ "Báo cáo tồn khả dụng" BẰNG PHÍM LỆNH VÀ JS
+    file_input.send_keys(Keys.CONTROL + "a")
+    file_input.send_keys(Keys.BACKSPACE)
+    driver.execute_script("arguments[0].value = '';", file_input)
+    time.sleep(0.5)
+
+    # Thử click nút 'x' nhỏ trong ô input nếu có
+    try:
+        clear_x = driver.find_element(By.XPATH, "//div[contains(@class,'modal')]//input/following-sibling::* | //div[contains(@class,'modal')]//i[contains(@class,'close') or contains(@class,'times') or contains(@class,'remove')]")
+        driver.execute_script("arguments[0].click();", clear_x)
+        time.sleep(0.3)
+    except Exception:
+        pass
+
+    # 2. ĐIỀN TÊN FILE MỚI & BẮN EVENT ANGULAR
+    type_with_js_events(driver, file_input, new_file_name)
+    time.sleep(1)
+    print_status("DOWNLOAD STEP", f"-> Da xoa chu cu va dien ten file moi: [{new_file_name}]")
+
+    # 3. BẤM NÚT "Tải về" (MÀU XANH TRONG POPUP)
+    print_status("DOWNLOAD STEP", "Nhan nut 'Tải về'...")
+    tai_ve_btn = wait.until(EC.element_to_be_clickable((
+        By.XPATH, "//button[contains(text(),'Tải về')] | //button[contains(text(),'Tai ve')] | //div[contains(@class,'modal')]//button[contains(@class,'btn-primary')]"
+    )))
+    driver.execute_script("arguments[0].click();", tai_ve_btn)
+    print_status("DOWNLOAD STEP SUCCESS", f"Da bam nut 'Tải về' cho file [{new_file_name}]. Dang cho 15 giây de hoan tat file...")
 
 def run_download():
     print("="*70, flush=True)
@@ -347,30 +381,22 @@ def run_download():
                 
             driver.execute_script("arguments[0].click();", search_btn)
             
-            # --- ĐÃ CẬP NHẬT: ĐỜI DÚNG 60 GiÂY CHO HỆ THỐNG TẢI XONG BÁO CÁO ---
+            # ĐỜI DÚNG 60 GiÂY CHO HỆ THỐNG TẢI DỮ LIỆU BÁO CÁO
             print_status(f"3.{idx}.3 SUCCESS", "-> Da bam nut Tim kiem/Xem bao cao. Dang cho 60s de he thong tai xong du lieu bao cao...")
             time.sleep(60)
 
-            # MỞ POPUP EXPORT EXCEL
+            # MỞ POPUP "XUẤT DỮ LIỆU"
             print_status(f"3.{idx}.4", "Mo Popup Export Excel...")
-            popup_status = trigger_export_excel_popup(driver, wait)
+            popup_opened = open_export_excel_popup(driver, wait)
             
-            if not popup_status:
-                print_status(f"3.{idx}.4 WARN", "Chua bat duoc popup, thu gui phim Enter hoac click lai...")
+            if not popup_opened:
+                print_status(f"3.{idx}.4 WARN", "Chua mo duoc popup, thu gui phim Enter hoac kich hoat lai...")
 
-            # ĐIỀN TÊN FILE TRONG MODAL POPUP
-            print_status(f"3.{idx}.5", f"Dien ten file moi: [{file_name}] va Xac nhan...")
-            file_name_input = wait.until(EC.presence_of_element_located((By.ID, "fileName_ctrl")))
-            type_with_js_events(driver, file_name_input, file_name)
-            time.sleep(1)
+            # XÓA TÊN CŨ, ĐIỀN TÊN MỚI VÀ BẤM NÚT "TẢI VỀ"
+            process_file_download(driver, wait, file_name)
+            time.sleep(15)
 
-            confirm_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div/div[3]/button[1] | //button[contains(text(),"Xác nhận") or contains(text(),"Tải")]')))
-            driver.execute_script("arguments[0].click();", confirm_btn)
-            print_status(f"3.{idx}.5 SUCCESS", f"-> Da gui lenh tai file [{file_name}]. Cho 12 giay...")
-            
-            time.sleep(12)
-
-            # KIỂM TRA FILE ĐÃ TẢI VỀ CHƯA
+            # KIỂM TRA FILE ĐÃ TẢI VỀ THÀNH CÔNG CHƯA
             current_files = list_downloaded_files()
             print_status(f"3.{idx}.6 CHECK FILE", f"Tong so file trong thu muc local: {len(current_files)}")
             for f in current_files:
